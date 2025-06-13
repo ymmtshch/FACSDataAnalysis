@@ -1,3 +1,6 @@
+# Upgrade pip first
+pip>=25.1.1
+
 # Core data processing
 pandas
 numpy
@@ -10,14 +13,9 @@ bokeh
 
 # Flow cytometry packages
 FlowIO
-# FlowKit - causing issues with Streamlit Cloud, try alternatives below:
 FlowUtils
 
 # Utilities
 requests
 PyYAML
 lxml
-
-# Alternative approach: Try installing FlowKit with specific version or from conda-forge
-# FlowKit==1.2.3
-# Or try installing with --no-deps flag in packages.txt
