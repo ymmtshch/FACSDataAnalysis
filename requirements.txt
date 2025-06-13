@@ -1,15 +1,23 @@
-# Minimal requirements for testing
+# Core data processing
 pandas
 numpy
-requests
-FlowKit
+scipy
 
-# Uncomment these one by one to test which package causes the issue:
-# scipy
-# matplotlib
-# altair
-# bokeh
-# PyYAML
-# lxml
-# FlowIO
-# FlowUtils
+# Visualization
+matplotlib
+altair
+bokeh
+
+# Flow cytometry packages
+FlowIO
+# FlowKit - causing issues with Streamlit Cloud, try alternatives below:
+FlowUtils
+
+# Utilities
+requests
+PyYAML
+lxml
+
+# Alternative approach: Try installing FlowKit with specific version or from conda-forge
+# FlowKit==1.2.3
+# Or try installing with --no-deps flag in packages.txt
