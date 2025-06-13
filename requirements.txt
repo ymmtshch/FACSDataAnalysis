@@ -1,22 +1,15 @@
-# Core data processing
+# Minimal requirements for testing
 pandas
 numpy
-scipy
-
-# Visualization
-matplotlib
-altair
-bokeh
-
-# Flow cytometry packages
-FlowIO
-FlowKit
-FlowUtils
-
-# Utilities
 requests
-PyYAML
-lxml
 
-# Streamlit (will be automatically installed by Streamlit Cloud)
-streamlit
+# Uncomment these one by one to test which package causes the issue:
+# scipy
+# matplotlib
+# altair
+# bokeh
+# PyYAML
+# lxml
+# FlowIO
+# FlowKit
+# FlowUtils
