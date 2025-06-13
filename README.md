@@ -1,3 +1,10 @@
+![Python](https://img.shields.io/badge/python-3.7%20%7C%203.8%20%7C%203.9-blue)
+![Streamlit](https://img.shields.io/badge/streamlit-1.30+-brightgreen)
+![fcsparser](https://img.shields.io/badge/uses-fcsparser-orange)
+[![PyPI - fcsparser](https://img.shields.io/pypi/v/fcsparser)](https://pypi.org/project/fcsparser/)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![FCS](https://img.shields.io/badge/.fcs-supported-lightgrey)
+![Deployed](https://img.shields.io/badge/Deployed%20on-Streamlit%20Cloud-orange)
 # FACS Data Analysis アプリ
 
 このアプリは、**Flow Cytometry Standard（.fcs）ファイル**からイベントデータを抽出し、CSV形式でダウンロードできる **Streamlit** ベースのWebアプリケーションです。FACS（蛍光抗体細胞ソーティング）の生データを手軽に確認・変換する用途に適しています。
