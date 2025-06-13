@@ -2,6 +2,7 @@
 pandas
 numpy
 requests
+FlowKit
 
 # Uncomment these one by one to test which package causes the issue:
 # scipy
@@ -11,5 +12,4 @@ requests
 # PyYAML
 # lxml
 # FlowIO
-# FlowKit
 # FlowUtils
