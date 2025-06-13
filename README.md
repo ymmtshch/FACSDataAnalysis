@@ -1,6 +1,6 @@
-# FCS イベントデータ抽出 & CSV ダウンロードアプリ
+# FACS イベントデータ抽出 & CSV ダウンロードアプリ
 
-FlowCytometry Standard（FCS）ファイルからイベントデータを抽出し、CSV形式でダウンロードできるStreamlitアプリケーションです。
+FlowCytometry Standard（.fcs）ファイルからイベントデータを抽出し、CSV形式でダウンロードできるStreamlitアプリケーションです。
 
 ## 機能
 
