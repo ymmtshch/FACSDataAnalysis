@@ -1,30 +1,23 @@
-# Streamlit Cloud対応版 requirements.txt
-# 軽量化とStreamlit Cloud環境での安定性を重視
-
-# Core Streamlit
-streamlit==1.28.1
-
-# Data Processing (軽量版)
+# Core dependencies
+streamlit>=1.28.0,<2.0.0
 pandas>=2.0.0,<3.0.0
-numpy==1.24.4
+numpy>=1.24.0,<2.0.0
 
-# Scientific Computing (軽量版)
-scipy==1.10.1
+# Visualization
+plotly>=5.15.0
+altair>=5.0.0
 
-# Visualization (Plotlyに統一)
-plotly==5.17.0
-altair==5.1.2
+# Scientific computing
+scipy>=1.10.0
 
-# FCS File Processing (flowkitの代替)
-fcsparser==0.2.8
+# Image processing (optional - may cause issues)
+# scikit-image>=0.21.0
 
-# Image Processing (軽量版)
-# scikit-image>=0.21.0 を削除 - 重すぎるため
-Pillow==10.0.1
+# Geometric operations
+shapely>=2.0.0
 
-# Geometry Processing (shapely代替)
-# shapely>=2.0.0 を削除 - システム依存のため
-# 必要な場合は簡単な数学計算で代替
+# FACS-specific (may cause compilation issues)
+# flowkit>=0.7.0
 
-# Additional utilities
-matplotlib==3.7.2
+# Interactive plotting (alternative to bokeh)
+# bokeh>=3.2.0
