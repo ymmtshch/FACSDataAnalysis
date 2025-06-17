@@ -10,7 +10,7 @@ APP_CONFIG = {
     'description': 'Streamlit-based Flow Cytometry Analysis Tool',
     'author': 'FACS Analysis Team',
     'max_file_size': 100,  # MB
-    'supported_formats': ['.fcs', '.FCS']
+    'supported_formats': ['.fcs', '.FCS', '.csv', '.xlsx']
 }
 
 # UI設定
@@ -98,7 +98,15 @@ SUCCESS_MESSAGES = {
     'settings_saved': '設定が保存されました。'
 }
 
-# チャンネル設定
+# FCS処理の代替設定
+FCS_CONFIG = {
+    'use_fallback_parser': True,  # FCSライブラリがない場合の代替処理
+    'fallback_formats': ['.csv', '.xlsx'],  # 代替フォーマット
+    'mock_fcs_columns': ['FSC-A', 'SSC-A', 'FITC-A', 'PE-A', 'APC-A'],  # テスト用カラム
+    'sample_data_size': 10000  # サンプルデータのサイズ
+}
+
+
 CHANNEL_CONFIG = {
     'common_channels': {
         'FSC-A': 'Forward Scatter Area',
