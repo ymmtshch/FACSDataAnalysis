@@ -1,13 +1,4 @@
-# Streamlit Cloud用システムパッケージ
-# 必要最小限のシステム依存関係のみ
-
-# 基本的なビルドツール（軽量化）
 build-essential
 python3-dev
-
-# 数値計算用ライブラリ
 libopenblas-dev
 liblapack-dev
-
-# その他の重いシステム依存パッケージは除外
-# （GEOS, GDAL等は使用しない）
