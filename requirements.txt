@@ -1,23 +1,4 @@
-# Core dependencies
-streamlit>=1.28.0,<2.0.0
-pandas>=2.0.0,<3.0.0
-numpy>=1.24.0,<2.0.0
-
-# Visualization
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
 plotly>=5.15.0
-altair>=5.0.0
-
-# Scientific computing
-scipy>=1.10.0
-
-# Image processing (optional - may cause issues)
-# scikit-image>=0.21.0
-
-# Geometric operations
-shapely>=2.0.0
-
-# FACS-specific (may cause compilation issues)
-# flowkit>=0.7.0
-
-# Interactive plotting (alternative to bokeh)
-# bokeh>=3.2.0
