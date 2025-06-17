@@ -1,0 +1,28 @@
+[global]
+# Streamlit設定ファイル
+dataFrameSerialization = "arrow"
+
+[server]
+# サーバー設定
+maxUploadSize = 100
+maxMessageSize = 100
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+# ブラウザ設定
+gatherUsageStats = false
+showErrorDetails = false
+
+[theme]
+# テーマ設定
+primaryColor = "#1f77b4"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+[client]
+# クライアント設定
+showErrorDetails = false
+toolbarMode = "minimal"
