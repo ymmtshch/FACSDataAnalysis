@@ -1,3 +1,5 @@
+# utils/fcs_processor.py の修正版
+
 """
 FCS file processing utilities using fcsparser
 """
@@ -48,6 +50,31 @@ class FCSProcessor:
         except Exception as e:
             st.error(f"FCSファイルの読み込みに失敗しました: {str(e)}")
             return None, None
+    
+    def get_file_info(self) -> Dict[str, Any]:
+        """
+        Get file information from metadata
+        
+        Returns:
+            Dictionary with file information
+        """
+        if not self.metadata:
+            return {}
+        
+        info = {}
+        
+        # Extract common FCS metadata
+        info['total_events'] = self.metadata.get('$TOT', 'N/A')
+        info['total_parameters'] = self.metadata.get('$PAR', 'N/A')
+        info['acquisition_date'] = self.metadata.get('$DATE', 'N/A')
+        info['acquisition_time'] = self.metadata.get('$BTIM', 'N/A')
+        info['cytometer'] = self.metadata.get('$CYT', 'N/A')
+        info['experiment_name'] = self.metadata.get('$EXP', 'N/A')
+        info['sample_id'] = self.metadata.get('SAMPLE ID', 'N/A')
+        info['operator'] = self.metadata.get('$OP', 'N/A')
+        info['software'] = self.metadata.get('$SRC', 'N/A')
+        
+        return info
     
     def get_channel_info(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -180,55 +207,6 @@ class FCSProcessor:
         return data_transformed
     
     def subsample_data(self, data: pd.DataFrame, 
-                          max_events: int = 10000) -> pd.DataFrame:
-            """
-            Subsample data for better performance
-            
-            Args:
-                data: Input dataframe
-                max_events: Maximum number of events
-            
-            Returns:
-                Subsampled dataframe
-            """
-            if len(data) <= max_events:
-                return data
-            
-            # Random sampling
-            return data.sample(n=max_events, random_state=42).reset_index(drop=True)
-
-
-    def load_and_process_fcs(uploaded_file, transformation='asinh', max_events=10000):
-        """
-        Load and process FCS file from uploaded file
-    
-        Args:
-            uploaded_file: Streamlit uploaded file object
-            transformation: Transformation to apply ('log', 'asinh', 'biexp', 'none')
-            max_events: Maximum number of events to keep
-        
-        Returns:
-            Tuple of (processed_data, metadata, processor_instance)
-        """
-        processor = FCSProcessor()
-    
-        # Load FCS file
-        data, metadata = processor.load_fcs_file(uploaded_file)
-    
-        if data is None:
-            return None, None, None
-    
-        # Apply transformation if requested
-        if transformation != 'none':
-            data = processor.apply_transformation(data, transformation)
-    
-        # Subsample if necessary
-        if max_events and len(data) > max_events:
-            data = processor.subsample_data(data, max_events)
-    
-        return data, metadata, processor
-
-    def subsample_data(self, data: pd.DataFrame, 
                       max_events: int = 10000) -> pd.DataFrame:
         """
         Subsample data for better performance
@@ -245,9 +223,25 @@ class FCSProcessor:
             
         # Random sampling
         return data.sample(n=max_events, random_state=42).reset_index(drop=True)
+    
+    def export_data(self, data: pd.DataFrame, format: str = 'csv') -> str:
+        """
+        Export data to specified format
+        
+        Args:
+            data: DataFrame to export
+            format: Export format ('csv')
+            
+        Returns:
+            Exported data as string
+        """
+        if format == 'csv':
+            return data.to_csv(index=False)
+        else:
+            return data.to_csv(index=False)
 
 
-# クラス外の関数として定義
+# Module-level function (kept outside class)
 def load_and_process_fcs(uploaded_file, transformation='asinh', max_events=10000):
     """
     Load and process FCS file from uploaded file
@@ -258,7 +252,7 @@ def load_and_process_fcs(uploaded_file, transformation='asinh', max_events=10000
         max_events: Maximum number of events to keep
         
     Returns:
-        Tuple of (processed_data, metadata, processor_instance)
+        Tuple of (processor_instance, processed_data, metadata)
     """
     processor = FCSProcessor()
     
@@ -277,7 +271,7 @@ def load_and_process_fcs(uploaded_file, transformation='asinh', max_events=10000
         if max_events and len(data) > max_events:
             data = processor.subsample_data(data, max_events)
         
-        return data, metadata, processor
+        return processor, data, metadata
         
     except Exception as e:
         st.error(f"FCSファイルの処理中にエラーが発生しました: {str(e)}")
