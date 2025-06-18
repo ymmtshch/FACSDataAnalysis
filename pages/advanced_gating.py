@@ -4,7 +4,7 @@ import numpy as np
 import fcsparser
 from utils.fcs_processor import FCSProcessor
 from utils.plotting import PlottingUtils  # 新しく追加したクラスを使用
-from utils.gating import GatingUtils
+from utils.gating import GateManager
 import plotly.express as px
 import plotly.graph_objects as go
 from shapely.geometry import Point, Polygon
@@ -124,7 +124,7 @@ def main():
                 st.rerun()
         
         # ゲーティングユーティリティ
-        gating_utils = GatingUtils()
+        gating_utils = GateManager()
         plotting_utils = PlottingUtils()
         
         # インタラクティブプロット
