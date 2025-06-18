@@ -1,26 +1,132 @@
+# .streamlit/config.toml - Streamlit configuration for FACS Data Analysis App
+# Updated for fcsparser migration from flowkit
+
 [global]
-# Streamlit Cloud対応設定
+# Development mode settings
+developmentMode = false
+logLevel = "info"
+unitTest = false
 
 [server]
-# メモリ使用量を抑制
-maxUploadSize = 50
-maxMessageSize = 50
-
-# パフォーマンス最適化
+# Server configuration
+port = 8501
 enableCORS = false
 enableXsrfProtection = true
+maxUploadSize = 100
+maxMessageSize = 100
+enableWebsocketCompression = false
+
+# Set to true to automatically rerun when files change
+runOnSave = false
+
+# Set to true to use the file watcher for rerunning on changes
+fileWatcherType = "auto"
+
+# Cookie settings
+cookieSecret = "a-random-key-here"
 
 [browser]
-# UI設定
+# Browser settings
 gatherUsageStats = false
+serverAddress = "localhost"
+serverPort = 8501
 
 [theme]
-# シンプルなテーマ
-primaryColor = "#FF6B6B"
+# Theme configuration
+primaryColor = "#FF6B35"
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F0F2F6"
 textColor = "#262730"
+font = "sans serif"
 
 [client]
-# クライアント設定
-showErrorDetails = false
+# Client configuration
+caching = true
+displayEnabled = true
+showErrorDetails = true
+
+[runner]
+# Runner configuration
+magicEnabled = true
+installTracer = false
+fixMatplotlib = true
+postScriptGC = true
+fastReruns = true
+
+[mapbox]
+# Mapbox token (if using mapbox features)
+token = ""
+
+[deprecation]
+# Deprecation warnings
+showPyplotGlobalUse = false
+showImageFormat = false
+
+[ui]
+# UI configuration
+hideTopBar = false
+hideSidebarNav = false
+
+# File uploader configuration
+[server.fileUploaderEncoding]
+# Set encoding for file uploads
+encoding = "utf-8"
+
+# Data frame configuration
+[global.dataFrameSerialization]
+# Use legacy mode for better compatibility with fcsparser output
+legacy = false
+
+# Performance optimization
+[global.developmentMode]
+# Disable development mode for better performance
+enabled = false
+
+# Cache configuration
+[global.suppressDeprecationWarnings]
+enabled = true
+
+# Share button configuration
+[global.showWarningOnDirectExecution]
+enabled = false
+
+# Metrics collection
+[browser.gatherUsageStats]
+enabled = false
+
+# CORS settings for API access
+[server.enableCORS]
+enabled = false
+
+# WebSocket settings
+[server.enableWebsocketCompression]
+enabled = false
+
+# Memory management
+[global.maxCachedMessageAge]
+# Cache messages for 1 day
+maxAge = 86400
+
+# File watcher settings for development
+[global.watcherType]
+type = "auto"
+
+# Session state settings
+[global.unitTest]
+enabled = false
+
+# Caching settings for better performance with large FCS files
+[global.disableWatchdogWarning]
+enabled = true
+
+# Suppress warnings that might confuse users
+[deprecation.showPyplotGlobalUse]
+enabled = false
+
+[deprecation.showImageFormat]  
+enabled = false
+
+# Custom styling
+[theme.base]
+# Use light theme as base
+base = "light"
