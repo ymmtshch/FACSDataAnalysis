@@ -1,374 +1,490 @@
-"""
-FACS解析アプリ - ゲーティング機能ユーティリティ
-フローサイトメトリーデータのゲーティング（解析領域設定）機能を提供
-"""
+# utils/gating.py - Gating utilities for FACS Data Analysis
+# Updated for fcsparser migration from flowkit
 
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Tuple, Optional, Union
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Point, Polygon
 from shapely.geometry.polygon import LinearRing
-import uuid
+from scipy.spatial import ConvexHull
 import streamlit as st
-from datetime import datetime
+from config import GATING_CONFIG
 
 class Gate:
-    """
-    ゲート（解析領域）を表現するクラス
-    """
+    """Base class for all gate types"""
     
-    def __init__(self, gate_id: str = None, gate_type: str = "polygon", 
-                 coordinates: List[Tuple[float, float]] = None, 
-                 axes: Tuple[str, str] = None, name: str = None):
-        """
-        ゲートの初期化
-        
-        Args:
-            gate_id: ゲートの一意ID
-            gate_type: ゲートタイプ（polygon, rectangle, ellipse）
-            coordinates: ゲート境界の座標リスト [(x1,y1), (x2,y2), ...]
-            axes: 使用する軸のペア (x_axis, y_axis)
-            name: ゲート名
-        """
-        self.gate_id = gate_id or str(uuid.uuid4())
+    def __init__(self, name, gate_type, channels, color='red'):
+        self.name = name
         self.gate_type = gate_type
-        self.coordinates = coordinates or []
-        self.axes = axes
-        self.name = name or f"Gate_{self.gate_id[:8]}"
-        self.created_at = datetime.now()
-        self.statistics = {}
-        self._polygon = None
-        
-    def add_point(self, x: float, y: float):
-        """座標点を追加"""
-        self.coordinates.append((x, y))
-        self._polygon = None  # キャッシュをクリア
-        
-    def close_gate(self):
-        """ゲートを閉じる（最初の点と最後の点を接続）"""
-        if len(self.coordinates) >= 3 and self.coordinates[0] != self.coordinates[-1]:
-            self.coordinates.append(self.coordinates[0])
-        self._update_polygon()
-        
-    def _update_polygon(self):
-        """Shapely Polygonオブジェクトを更新"""
-        if len(self.coordinates) >= 3:
-            try:
-                self._polygon = Polygon(self.coordinates)
-            except Exception as e:
-                st.warning(f"ゲート作成エラー: {e}")
-                self._polygon = None
-                
-    def contains_points(self, data: pd.DataFrame) -> np.ndarray:
-        """
-        データポイントがゲート内にあるかチェック
-        
-        Args:
-            data: 解析対象データ
-            
-        Returns:
-            ゲート内にあるポイントのブール配列
-        """
-        if not self.axes or not self._polygon:
-            return np.array([False] * len(data))
-            
-        x_col, y_col = self.axes
-        if x_col not in data.columns or y_col not in data.columns:
-            return np.array([False] * len(data))
-            
-        points = data[[x_col, y_col]].values
-        mask = np.array([self._polygon.contains(Point(p)) for p in points])
-        return mask
-        
-    def calculate_statistics(self, data: pd.DataFrame) -> Dict:
-        """
-        ゲート内データの統計を計算
-        
-        Args:
-            data: 解析対象データ
-            
-        Returns:
-            統計情報辞書
-        """
-        mask = self.contains_points(data)
-        gated_data = data[mask]
+        self.channels = channels
+        self.color = color
+        self.created_at = pd.Timestamp.now()
+    
+    def apply(self, data):
+        """Apply gate to data - to be implemented by subclasses"""
+        raise NotImplementedError
+    
+    def get_statistics(self, data):
+        """Get statistics for gated data"""
+        gated_data = self.apply(data)
+        if gated_data is None or len(gated_data) == 0:
+            return None
         
         total_events = len(data)
         gated_events = len(gated_data)
-        percentage = (gated_events / total_events * 100) if total_events > 0 else 0
+        percentage = (gated_events / total_events) * 100 if total_events > 0 else 0
         
-        stats = {
+        return {
             'total_events': total_events,
             'gated_events': gated_events,
             'percentage': percentage,
             'gate_name': self.name,
             'gate_type': self.gate_type,
-            'axes': self.axes
+            'channels': self.channels
         }
-        
-        # 各パラメータの統計
-        if len(gated_data) > 0:
-            numeric_cols = gated_data.select_dtypes(include=[np.number]).columns
-            for col in numeric_cols:
-                stats[f'{col}_mean'] = float(gated_data[col].mean())
-                stats[f'{col}_median'] = float(gated_data[col].median())
-                stats[f'{col}_std'] = float(gated_data[col].std())
-                
-        self.statistics = stats
-        return stats
-        
-    def to_dict(self) -> Dict:
-        """ゲート情報を辞書形式で返す"""
-        return {
-            'gate_id': self.gate_id,
-            'gate_type': self.gate_type,
-            'coordinates': self.coordinates,
-            'axes': self.axes,
-            'name': self.name,
-            'created_at': self.created_at.isoformat(),
-            'statistics': self.statistics
-        }
-        
-    @classmethod
-    def from_dict(cls, data: Dict):
-        """辞書からゲートオブジェクトを作成"""
-        gate = cls(
-            gate_id=data['gate_id'],
-            gate_type=data['gate_type'],
-            coordinates=data['coordinates'],
-            axes=data['axes'],
-            name=data['name']
-        )
-        gate.created_at = datetime.fromisoformat(data['created_at'])
-        gate.statistics = data.get('statistics', {})
-        gate._update_polygon()
-        return gate
 
-class GatingManager:
-    """
-    ゲーティング機能を管理するクラス
-    """
+class PolygonGate(Gate):
+    """Polygon gate for 2D data"""
+    
+    def __init__(self, name, x_channel, y_channel, vertices, color='red'):
+        super().__init__(name, 'polygon', [x_channel, y_channel], color)
+        self.x_channel = x_channel
+        self.y_channel = y_channel
+        self.vertices = vertices
+        self.polygon = None
+        self._create_polygon()
+    
+    def _create_polygon(self):
+        """Create Shapely polygon from vertices"""
+        if len(self.vertices) >= 3:
+            try:
+                self.polygon = Polygon(self.vertices)
+            except Exception as e:
+                st.error(f"Error creating polygon: {e}")
+                self.polygon = None
+    
+    def apply(self, data):
+        """Apply polygon gate to data"""
+        if self.polygon is None:
+            return None
+        
+        if self.x_channel not in data.columns or self.y_channel not in data.columns:
+            st.error(f"Channels {self.x_channel} or {self.y_channel} not found in data")
+            return None
+        
+        # Create points from data
+        points = list(zip(data[self.x_channel], data[self.y_channel]))
+        
+        # Check which points are inside the polygon
+        mask = [self.polygon.contains(Point(point)) for point in points]
+        
+        return data[mask]
+    
+    def get_vertices_array(self):
+        """Get vertices as numpy array"""
+        return np.array(self.vertices)
+
+class RectangleGate(Gate):
+    """Rectangle gate for 2D data"""
+    
+    def __init__(self, name, x_channel, y_channel, x_min, x_max, y_min, y_max, color='blue'):
+        super().__init__(name, 'rectangle', [x_channel, y_channel], color)
+        self.x_channel = x_channel
+        self.y_channel = y_channel
+        self.x_min = x_min
+        self.x_max = x_max
+        self.y_min = y_min
+        self.y_max = y_max
+    
+    def apply(self, data):
+        """Apply rectangle gate to data"""
+        if self.x_channel not in data.columns or self.y_channel not in data.columns:
+            st.error(f"Channels {self.x_channel} or {self.y_channel} not found in data")
+            return None
+        
+        mask = (
+            (data[self.x_channel] >= self.x_min) &
+            (data[self.x_channel] <= self.x_max) &
+            (data[self.y_channel] >= self.y_min) &
+            (data[self.y_channel] <= self.y_max)
+        )
+        
+        return data[mask]
+    
+    def get_rectangle_coords(self):
+        """Get rectangle coordinates for plotting"""
+        return {
+            'x': [self.x_min, self.x_max, self.x_max, self.x_min, self.x_min],
+            'y': [self.y_min, self.y_min, self.y_max, self.y_max, self.y_min]
+        }
+
+class EllipseGate(Gate):
+    """Ellipse gate for 2D data"""
+    
+    def __init__(self, name, x_channel, y_channel, center_x, center_y, 
+                 width, height, angle=0, color='green'):
+        super().__init__(name, 'ellipse', [x_channel, y_channel], color)
+        self.x_channel = x_channel
+        self.y_channel = y_channel
+        self.center_x = center_x
+        self.center_y = center_y
+        self.width = width
+        self.height = height
+        self.angle = angle  # rotation angle in degrees
+    
+    def apply(self, data):
+        """Apply ellipse gate to data"""
+        if self.x_channel not in data.columns or self.y_channel not in data.columns:
+            st.error(f"Channels {self.x_channel} or {self.y_channel} not found in data")
+            return None
+        
+        # Translate points to ellipse center
+        x_translated = data[self.x_channel] - self.center_x
+        y_translated = data[self.y_channel] - self.center_y
+        
+        # Rotate points if angle is specified
+        if self.angle != 0:
+            angle_rad = np.radians(self.angle)
+            cos_angle = np.cos(angle_rad)
+            sin_angle = np.sin(angle_rad)
+            
+            x_rotated = x_translated * cos_angle + y_translated * sin_angle
+            y_rotated = -x_translated * sin_angle + y_translated * cos_angle
+        else:
+            x_rotated = x_translated
+            y_rotated = y_translated
+        
+        # Check if points are inside ellipse
+        ellipse_eq = (x_rotated / (self.width / 2)) ** 2 + (y_rotated / (self.height / 2)) ** 2
+        mask = ellipse_eq <= 1
+        
+        return data[mask]
+    
+    def get_ellipse_points(self, n_points=100):
+        """Get ellipse boundary points for plotting"""
+        theta = np.linspace(0, 2 * np.pi, n_points)
+        
+        # Ellipse points in local coordinates
+        x_local = (self.width / 2) * np.cos(theta)
+        y_local = (self.height / 2) * np.sin(theta)
+        
+        # Rotate if necessary
+        if self.angle != 0:
+            angle_rad = np.radians(self.angle)
+            cos_angle = np.cos(angle_rad)
+            sin_angle = np.sin(angle_rad)
+            
+            x_rotated = x_local * cos_angle - y_local * sin_angle
+            y_rotated = x_local * sin_angle + y_local * cos_angle
+        else:
+            x_rotated = x_local
+            y_rotated = y_local
+        
+        # Translate to center
+        x_final = x_rotated + self.center_x
+        y_final = y_rotated + self.center_y
+        
+        return x_final, y_final
+
+class ThresholdGate(Gate):
+    """Threshold gate for 1D data"""
+    
+    def __init__(self, name, channel, threshold, direction='above', color='orange'):
+        super().__init__(name, 'threshold', [channel], color)
+        self.channel = channel
+        self.threshold = threshold
+        self.direction = direction  # 'above' or 'below'
+    
+    def apply(self, data):
+        """Apply threshold gate to data"""
+        if self.channel not in data.columns:
+            st.error(f"Channel {self.channel} not found in data")
+            return None
+        
+        if self.direction == 'above':
+            mask = data[self.channel] >= self.threshold
+        else:  # below
+            mask = data[self.channel] <= self.threshold
+        
+        return data[mask]
+
+class QuadrantGate(Gate):
+    """Quadrant gate for 2D data"""
+    
+    def __init__(self, name, x_channel, y_channel, x_threshold, y_threshold, color='purple'):
+        super().__init__(name, 'quadrant', [x_channel, y_channel], color)
+        self.x_channel = x_channel
+        self.y_channel = y_channel
+        self.x_threshold = x_threshold
+        self.y_threshold = y_threshold
+    
+    def apply(self, data, quadrant='all'):
+        """Apply quadrant gate to data
+        
+        Parameters:
+        - quadrant: 'all', 'Q1' (upper right), 'Q2' (upper left), 
+                   'Q3' (lower left), 'Q4' (lower right)
+        """
+        if self.x_channel not in data.columns or self.y_channel not in data.columns:
+            st.error(f"Channels {self.x_channel} or {self.y_channel} not found in data")
+            return None
+        
+        x_data = data[self.x_channel]
+        y_data = data[self.y_channel]
+        
+        if quadrant == 'all':
+            return data
+        elif quadrant == 'Q1':  # Upper right
+            mask = (x_data >= self.x_threshold) & (y_data >= self.y_threshold)
+        elif quadrant == 'Q2':  # Upper left
+            mask = (x_data < self.x_threshold) & (y_data >= self.y_threshold)
+        elif quadrant == 'Q3':  # Lower left
+            mask = (x_data < self.x_threshold) & (y_data < self.y_threshold)
+        elif quadrant == 'Q4':  # Lower right
+            mask = (x_data >= self.x_threshold) & (y_data < self.y_threshold)
+        else:
+            st.error(f"Invalid quadrant: {quadrant}")
+            return None
+        
+        return data[mask]
+    
+    def get_quadrant_statistics(self, data):
+        """Get statistics for all quadrants"""
+        total_events = len(data)
+        stats = {}
+        
+        for quad in ['Q1', 'Q2', 'Q3', 'Q4']:
+            quad_data = self.apply(data, quad)
+            if quad_data is not None:
+                count = len(quad_data)
+                percentage = (count / total_events) * 100 if total_events > 0 else 0
+                stats[quad] = {
+                    'count': count,
+                    'percentage': percentage
+                }
+        
+        return stats
+
+class GateManager:
+    """Manager class for handling multiple gates"""
     
     def __init__(self):
-        self.gates: List[Gate] = []
-        self.active_gate: Optional[Gate] = None
+        self.gates = {}
+        self.gate_hierarchy = {}  # For storing parent-child relationships
+    
+    def add_gate(self, gate):
+        """Add a gate to the manager"""
+        if not isinstance(gate, Gate):
+            raise ValueError("Object must be a Gate instance")
         
-    def create_gate(self, gate_type: str = "polygon", axes: Tuple[str, str] = None, 
-                   name: str = None) -> Gate:
-        """
-        新しいゲートを作成
-        
-        Args:
-            gate_type: ゲートタイプ
-            axes: 使用する軸
-            name: ゲート名
-            
-        Returns:
-            作成されたGateオブジェクト
-        """
-        gate = Gate(gate_type=gate_type, axes=axes, name=name)
-        self.active_gate = gate
-        return gate
-        
-    def add_gate(self, gate: Gate):
-        """ゲートをリストに追加"""
-        if gate not in self.gates:
-            self.gates.append(gate)
-            
-    def remove_gate(self, gate_id: str) -> bool:
-        """ゲートを削除"""
-        for i, gate in enumerate(self.gates):
-            if gate.gate_id == gate_id:
-                del self.gates[i]
-                if self.active_gate and self.active_gate.gate_id == gate_id:
-                    self.active_gate = None
-                return True
-        return False
-        
-    def get_gate(self, gate_id: str) -> Optional[Gate]:
-        """ゲートIDでゲートを取得"""
-        for gate in self.gates:
-            if gate.gate_id == gate_id:
-                return gate
-        return None
-        
-    def apply_gates(self, data: pd.DataFrame, gate_ids: List[str] = None) -> pd.DataFrame:
-        """
-        指定されたゲートを適用してデータをフィルタリング
-        
-        Args:
-            data: 解析対象データ
-            gate_ids: 適用するゲートIDのリスト（Noneの場合は全ゲート）
-            
-        Returns:
-            ゲーティング後のデータ
-        """
-        if gate_ids is None:
-            gates_to_apply = self.gates
+        self.gates[gate.name] = gate
+        st.success(f"Gate '{gate.name}' added successfully")
+    
+    def remove_gate(self, gate_name):
+        """Remove a gate from the manager"""
+        if gate_name in self.gates:
+            del self.gates[gate_name]
+            # Remove from hierarchy if exists
+            if gate_name in self.gate_hierarchy:
+                del self.gate_hierarchy[gate_name]
+            st.success(f"Gate '{gate_name}' removed successfully")
         else:
-            gates_to_apply = [self.get_gate(gid) for gid in gate_ids if self.get_gate(gid)]
-            
-        if not gates_to_apply:
-            return data
-            
-        # 全てのゲートの条件を満たすデータを抽出
-        combined_mask = np.ones(len(data), dtype=bool)
-        for gate in gates_to_apply:
-            gate_mask = gate.contains_points(data)
-            combined_mask = combined_mask & gate_mask
-            
-        return data[combined_mask]
+            st.error(f"Gate '{gate_name}' not found")
+    
+    def get_gate(self, gate_name):
+        """Get a gate by name"""
+        return self.gates.get(gate_name)
+    
+    def list_gates(self):
+        """List all gates"""
+        return list(self.gates.keys())
+    
+    def apply_gate(self, gate_name, data):
+        """Apply a specific gate to data"""
+        gate = self.get_gate(gate_name)
+        if gate is None:
+            st.error(f"Gate '{gate_name}' not found")
+            return None
         
-    def calculate_gate_hierarchy(self, data: pd.DataFrame) -> Dict:
-        """
-        ゲート階層統計を計算
-        ゲートの親子関係と重複を分析
-        """
-        hierarchy = {}
+        return gate.apply(data)
+    
+    def apply_gate_sequence(self, gate_names, data):
+        """Apply a sequence of gates to data"""
+        current_data = data
         
-        for gate in self.gates:
-            gate_stats = gate.calculate_statistics(data)
-            hierarchy[gate.gate_id] = {
-                'gate': gate,
-                'stats': gate_stats,
-                'children': [],
-                'parents': []
+        for gate_name in gate_names:
+            gate = self.get_gate(gate_name)
+            if gate is None:
+                st.error(f"Gate '{gate_name}' not found")
+                return None
+            
+            current_data = gate.apply(current_data)
+            if current_data is None or len(current_data) == 0:
+                st.warning(f"No events remaining after applying gate '{gate_name}'")
+                break
+        
+        return current_data
+    
+    def get_gate_statistics(self, gate_name, data):
+        """Get statistics for a specific gate"""
+        gate = self.get_gate(gate_name)
+        if gate is None:
+            return None
+        
+        return gate.get_statistics(data)
+    
+    def get_all_gate_statistics(self, data):
+        """Get statistics for all gates"""
+        stats = {}
+        for gate_name, gate in self.gates.items():
+            stats[gate_name] = gate.get_statistics(data)
+        
+        return stats
+    
+    def export_gates(self):
+        """Export gate definitions for later use"""
+        gate_definitions = {}
+        
+        for name, gate in self.gates.items():
+            gate_def = {
+                'name': gate.name,
+                'type': gate.gate_type,
+                'channels': gate.channels,
+                'color': gate.color,
+                'created_at': gate.created_at.isoformat()
             }
             
-        # 親子関係の計算（簡易版：座標重複チェック）
-        for i, gate1 in enumerate(self.gates):
-            for j, gate2 in enumerate(self.gates):
-                if i != j and gate1._polygon and gate2._polygon:
-                    if gate1._polygon.contains(gate2._polygon):
-                        hierarchy[gate1.gate_id]['children'].append(gate2.gate_id)
-                        hierarchy[gate2.gate_id]['parents'].append(gate1.gate_id)
-                        
-        return hierarchy
+            # Add type-specific parameters
+            if isinstance(gate, PolygonGate):
+                gate_def['vertices'] = gate.vertices
+            elif isinstance(gate, RectangleGate):
+                gate_def.update({
+                    'x_min': gate.x_min,
+                    'x_max': gate.x_max,
+                    'y_min': gate.y_min,
+                    'y_max': gate.y_max
+                })
+            elif isinstance(gate, EllipseGate):
+                gate_def.update({
+                    'center_x': gate.center_x,
+                    'center_y': gate.center_y,
+                    'width': gate.width,
+                    'height': gate.height,
+                    'angle': gate.angle
+                })
+            elif isinstance(gate, ThresholdGate):
+                gate_def.update({
+                    'threshold': gate.threshold,
+                    'direction': gate.direction
+                })
+            elif isinstance(gate, QuadrantGate):
+                gate_def.update({
+                    'x_threshold': gate.x_threshold,
+                    'y_threshold': gate.y_threshold
+                })
+            
+            gate_definitions[name] = gate_def
         
-    def export_gates(self) -> List[Dict]:
-        """ゲート情報をエクスポート用辞書リストで返す"""
-        return [gate.to_dict() for gate in self.gates]
-        
-    def import_gates(self, gates_data: List[Dict]):
-        """ゲート情報をインポート"""
-        self.gates = []
-        for gate_data in gates_data:
-            gate = Gate.from_dict(gate_data)
-            self.gates.append(gate)
+        return gate_definitions
+    
+    def import_gates(self, gate_definitions):
+        """Import gate definitions"""
+        for name, gate_def in gate_definitions.items():
+            try:
+                if gate_def['type'] == 'polygon':
+                    gate = PolygonGate(
+                        name=gate_def['name'],
+                        x_channel=gate_def['channels'][0],
+                        y_channel=gate_def['channels'][1],
+                        vertices=gate_def['vertices'],
+                        color=gate_def.get('color', 'red')
+                    )
+                elif gate_def['type'] == 'rectangle':
+                    gate = RectangleGate(
+                        name=gate_def['name'],
+                        x_channel=gate_def['channels'][0],
+                        y_channel=gate_def['channels'][1],
+                        x_min=gate_def['x_min'],
+                        x_max=gate_def['x_max'],
+                        y_min=gate_def['y_min'],
+                        y_max=gate_def['y_max'],
+                        color=gate_def.get('color', 'blue')
+                    )
+                elif gate_def['type'] == 'ellipse':
+                    gate = EllipseGate(
+                        name=gate_def['name'],
+                        x_channel=gate_def['channels'][0],
+                        y_channel=gate_def['channels'][1],
+                        center_x=gate_def['center_x'],
+                        center_y=gate_def['center_y'],
+                        width=gate_def['width'],
+                        height=gate_def['height'],
+                        angle=gate_def.get('angle', 0),
+                        color=gate_def.get('color', 'green')
+                    )
+                elif gate_def['type'] == 'threshold':
+                    gate = ThresholdGate(
+                        name=gate_def['name'],
+                        channel=gate_def['channels'][0],
+                        threshold=gate_def['threshold'],
+                        direction=gate_def.get('direction', 'above'),
+                        color=gate_def.get('color', 'orange')
+                    )
+                elif gate_def['type'] == 'quadrant':
+                    gate = QuadrantGate(
+                        name=gate_def['name'],
+                        x_channel=gate_def['channels'][0],
+                        y_channel=gate_def['channels'][1],
+                        x_threshold=gate_def['x_threshold'],
+                        y_threshold=gate_def['y_threshold'],
+                        color=gate_def.get('color', 'purple')
+                    )
+                else:
+                    st.error(f"Unknown gate type: {gate_def['type']}")
+                    continue
+                
+                self.add_gate(gate)
+                
+            except Exception as e:
+                st.error(f"Error importing gate '{name}': {e}")
 
-def create_rectangular_gate(x_min: float, x_max: float, y_min: float, y_max: float,
-                          axes: Tuple[str, str], name: str = None) -> Gate:
-    """
-    矩形ゲートを作成
+def create_polygon_from_clicks(click_coordinates, min_points=3):
+    """Create a polygon gate from mouse click coordinates"""
+    if len(click_coordinates) < min_points:
+        st.warning(f"Need at least {min_points} points to create a polygon gate")
+        return None
     
-    Args:
-        x_min, x_max: X軸の範囲
-        y_min, y_max: Y軸の範囲
-        axes: 使用する軸
-        name: ゲート名
-        
-    Returns:
-        矩形ゲート
-    """
-    coordinates = [
-        (x_min, y_min),
-        (x_max, y_min),
-        (x_max, y_max),
-        (x_min, y_max),
-        (x_min, y_min)
-    ]
+    # Close the polygon by adding the first point at the end
+    vertices = click_coordinates + [click_coordinates[0]]
     
-    gate = Gate(gate_type="rectangle", coordinates=coordinates, axes=axes, name=name)
-    gate._update_polygon()
-    return gate
+    return vertices
 
-def create_elliptical_gate(center_x: float, center_y: float, 
-                          width: float, height: float,
-                          axes: Tuple[str, str], name: str = None, 
-                          n_points: int = 50) -> Gate:
-    """
-    楕円ゲートを作成
+def calculate_convex_hull_gate(data, x_channel, y_channel, fraction=0.95):
+    """Create a convex hull gate around a fraction of the data"""
+    if x_channel not in data.columns or y_channel not in data.columns:
+        st.error("Channels not found in data")
+        return None
     
-    Args:
-        center_x, center_y: 中心座標
-        width, height: 幅と高さ
-        axes: 使用する軸
-        name: ゲート名
-        n_points: 楕円を近似する点の数
-        
-    Returns:
-        楕円ゲート
-    """
-    angles = np.linspace(0, 2*np.pi, n_points)
-    coordinates = []
+    # Sample data points
+    points = np.column_stack([data[x_channel], data[y_channel]])
     
-    for angle in angles:
-        x = center_x + (width/2) * np.cos(angle)
-        y = center_y + (height/2) * np.sin(angle)
-        coordinates.append((x, y))
-        
-    coordinates.append(coordinates[0])  # 閉じる
+    # Calculate density and select points within fraction
+    from scipy.stats import gaussian_kde
+    kde = gaussian_kde(points.T)
+    density = kde(points.T)
     
-    gate = Gate(gate_type="ellipse", coordinates=coordinates, axes=axes, name=name)
-    gate._update_polygon()
-    return gate
-
-# セッション状態管理用ヘルパー関数
-def get_gating_manager() -> GatingManager:
-    """セッション状態からGatingManagerを取得または作成"""
-    if 'gating_manager' not in st.session_state:
-        st.session_state.gating_manager = GatingManager()
-    return st.session_state.gating_manager
-
-def save_gates_to_session():
-    """ゲート情報をセッション状態に保存"""
-    manager = get_gating_manager()
-    st.session_state.current_gates = manager.export_gates()
-
-def load_gates_from_session():
-    """セッション状態からゲート情報を読み込み"""
-    if 'current_gates' in st.session_state:
-        manager = get_gating_manager()
-        manager.import_gates(st.session_state.current_gates)
-
-# デバッグ・テスト用関数
-def generate_test_data(n_points: int = 1000) -> pd.DataFrame:
-    """テスト用のサンプルデータを生成"""
-    np.random.seed(42)
-    data = pd.DataFrame({
-        'FSC-A': np.random.normal(50000, 15000, n_points),
-        'SSC-A': np.random.normal(30000, 10000, n_points),
-        'FITC-A': np.random.exponential(1000, n_points),
-        'PE-A': np.random.exponential(800, n_points)
-    })
-    # 負の値を除去
-    data = data[data > 0].dropna()
-    return data
-
-if __name__ == "__main__":
-    # テスト実行例
-    print("FACS Gating Utils Test")
+    # Select points above threshold
+    threshold = np.percentile(density, (1 - fraction) * 100)
+    selected_points = points[density >= threshold]
     
-    # テストデータ生成
-    test_data = generate_test_data()
-    print(f"Generated {len(test_data)} test events")
+    if len(selected_points) < 3:
+        st.error("Not enough points for convex hull")
+        return None
     
-    # ゲーティングマネージャー作成
-    manager = GatingManager()
-    
-    # 矩形ゲート作成
-    rect_gate = create_rectangular_gate(
-        x_min=20000, x_max=80000,
-        y_min=10000, y_max=50000,
-        axes=('FSC-A', 'SSC-A'),
-        name="Lymphocytes"
-    )
-    manager.add_gate(rect_gate)
-    
-    # 統計計算
-    stats = rect_gate.calculate_statistics(test_data)
-    print(f"Rectangle gate stats: {stats['gated_events']}/{stats['total_events']} ({stats['percentage']:.1f}%)")
-    
-    # ゲーティング適用
-    gated_data = manager.apply_gates(test_data, [rect_gate.gate_id])
-    print(f"Gated data: {len(gated_data)} events")
+    # Calculate convex hull
+    try:
+        hull = ConvexHull(selected_points)
+        vertices = selected_points[hull.vertices].tolist()
+        return vertices
+    except Exception as e:
+        st.error(f"Error calculating convex hull: {e}")
+        return None
