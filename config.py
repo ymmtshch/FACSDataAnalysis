@@ -1,123 +1,152 @@
-# config.py
-"""
-FACS解析アプリケーション設定ファイル
-"""
+# config.py - Configuration file for FACS Data Analysis App
+# Updated for fcsparser migration from flowkit
 
-# アプリケーション設定
+import streamlit as st
+
+# App configuration
 APP_CONFIG = {
-    'title': 'FACS Data Analysis Platform',
-    'version': '1.0.0',
-    'description': 'Streamlit-based Flow Cytometry Analysis Tool',
-    'author': 'FACS Analysis Team',
-    'max_file_size': 100,  # MB
-    'supported_formats': ['.fcs', '.FCS', '.csv', '.xlsx']
-}
-
-# UI設定
-UI_CONFIG = {
+    'title': 'FACS Data Analysis',
+    'page_title': 'FACSデータ解析',
     'page_icon': '🔬',
     'layout': 'wide',
-    'sidebar_width': 300,
-    'plot_height': 500,
-    'plot_width': 700,
-    'color_palette': [
-        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
-        '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
-        '#bcbd22', '#17becf'
-    ]
+    'initial_sidebar_state': 'expanded'
 }
 
-# プロット設定
+# File upload configuration
+UPLOAD_CONFIG = {
+    'max_file_size': 100,  # MB
+    'allowed_extensions': ['.fcs'],
+    'upload_help': 'FCS 2.0/3.0/3.1形式のファイルをアップロードしてください（最大100MB）'
+}
+
+# Plotting configuration
 PLOT_CONFIG = {
-    'default_bins': 50,
-    'contour_levels': 10,
-    'density_colormap': 'viridis',
-    'histogram_alpha': 0.7,
-    'scatter_alpha': 0.6,
-    'scatter_size': 2,
-    'line_width': 2,
-    'grid_alpha': 0.3
+    'default_bins': 100,
+    'max_bins': 500,
+    'default_alpha': 0.7,
+    'colormap_options': ['viridis', 'plasma', 'inferno', 'magma', 'cividis'],
+    'default_colormap': 'viridis',
+    'figure_size': (800, 600),
+    'scatter_size': 2
 }
 
-# ゲーティング設定
+# Gating configuration
 GATING_CONFIG = {
-    'default_gate_color': '#ff0000',
+    'gate_colors': ['red', 'blue', 'green', 'orange', 'purple'],
+    'default_gate_color': 'red',
     'gate_line_width': 2,
     'gate_alpha': 0.3,
-    'selection_color': '#00ff00',
-    'min_gate_points': 3,
-    'gate_types': ['polygon', 'rectangle', 'ellipse', 'threshold']
+    'min_gate_points': 3
 }
 
-# 統計設定
-STATS_CONFIG = {
-    'percentiles': [1, 5, 10, 25, 50, 75, 90, 95, 99],
-    'statistical_measures': ['count', 'mean', 'median', 'std', 'min', 'max'],
-    'outlier_threshold': 3  # 標準偏差の倍数
-}
-
-# データ処理設定
+# Data processing configuration
 DATA_CONFIG = {
-    'compensation_method': 'spillover_matrix',
-    'transformation_methods': ['asinh', 'log', 'biexponential', 'linear'],
-    'default_transformation': 'asinh',
-    'asinh_cofactor': 150,
-    'log_base': 10,
-    'negative_handling': 'truncate'  # 'truncate' or 'shift'
+    'max_events_display': 50000,  # Maximum events to display for performance
+    'subsample_for_plot': True,
+    'default_subsample_size': 10000,
+    'compensation_methods': ['none', 'spillover_matrix'],
+    'transform_methods': ['linear', 'log', 'asinh', 'biexponential']
 }
 
-# セッション状態のキー
-SESSION_KEYS = {
-    'fcs_data': 'fcs_data',
-    'fcs_meta': 'fcs_meta',
-    'current_gates': 'current_gates',
-    'gate_stats': 'gate_stats',
-    'selected_channels': 'selected_channels',
-    'transformation_params': 'transformation_params',
-    'plot_settings': 'plot_settings',
-    'analysis_history': 'analysis_history'
-}
-
-# エラーメッセージ
+# Error messages (Japanese)
 ERROR_MESSAGES = {
-    'file_not_found': 'ファイルが見つかりません。',
-    'invalid_format': 'サポートされていないファイル形式です。',
-    'file_too_large': f'ファイルサイズが{APP_CONFIG["max_file_size"]}MBを超えています。',
-    'parsing_error': 'ファイルの解析中にエラーが発生しました。',
-    'insufficient_data': 'データが不十分です。',
-    'gate_error': 'ゲート設定にエラーがあります。',
-    'plotting_error': 'プロット作成中にエラーが発生しました。'
+    'file_too_large': f'ファイルサイズが{UPLOAD_CONFIG["max_file_size"]}MBを超えています。',
+    'invalid_file_format': 'サポートされていないファイル形式です。FCSファイルをアップロードしてください。',
+    'file_read_error': 'ファイルの読み込みに失敗しました。ファイルが破損している可能性があります。',
+    'insufficient_data': 'データが不十分です。より多くのイベントが必要です。',
+    'channel_not_found': '指定されたチャンネルが見つかりません。',
+    'gating_error': 'ゲーティング処理中にエラーが発生しました。',
+    'export_error': 'データのエクスポート中にエラーが発生しました。',
+    'plot_error': 'プロットの作成中にエラーが発生しました。',
+    'memory_error': 'メモリ不足です。データサイズを小さくしてください。'
 }
 
-# 成功メッセージ
+# Success messages (Japanese)
 SUCCESS_MESSAGES = {
-    'file_uploaded': 'ファイルが正常にアップロードされました。',
-    'analysis_complete': '解析が完了しました。',
-    'gate_created': 'ゲートが作成されました。',
-    'data_exported': 'データがエクスポートされました。',
+    'file_loaded': 'ファイルが正常に読み込まれました。',
+    'gate_created': 'ゲートが正常に作成されました。',
+    'data_exported': 'データが正常にエクスポートされました。',
     'settings_saved': '設定が保存されました。'
 }
 
-# FCS処理の代替設定
-FCS_CONFIG = {
-    'use_fallback_parser': True,  # FCSライブラリがない場合の代替処理
-    'fallback_formats': ['.csv', '.xlsx'],  # 代替フォーマット
-    'mock_fcs_columns': ['FSC-A', 'SSC-A', 'FITC-A', 'PE-A', 'APC-A'],  # テスト用カラム
-    'sample_data_size': 10000  # サンプルデータのサイズ
+# Warning messages (Japanese)
+WARNING_MESSAGES = {
+    'large_file': 'ファイルサイズが大きいため、処理に時間がかかる場合があります。',
+    'many_events': 'イベント数が多いため、表示をサブサンプリングしています。',
+    'no_compensation': '補正行列が適用されていません。',
+    'performance_warning': 'パフォーマンスを向上させるため、一部のデータのみ表示しています。'
 }
 
-
-CHANNEL_CONFIG = {
-    'common_channels': {
-        'FSC-A': 'Forward Scatter Area',
-        'FSC-H': 'Forward Scatter Height',
-        'SSC-A': 'Side Scatter Area',
-        'SSC-H': 'Side Scatter Height',
-        'FITC-A': 'FITC Area',
-        'PE-A': 'PE Area',
-        'APC-A': 'APC Area',
-        'PerCP-A': 'PerCP Area'
-    },
-    'fluorescence_channels': ['FITC', 'PE', 'APC', 'PerCP', 'PE-Cy7', 'APC-Cy7'],
-    'scatter_channels': ['FSC', 'SSC']
+# Channel name mappings (common flow cytometry channels)
+CHANNEL_MAPPINGS = {
+    'FSC-A': 'Forward Scatter Area',
+    'FSC-H': 'Forward Scatter Height',
+    'FSC-W': 'Forward Scatter Width',
+    'SSC-A': 'Side Scatter Area',
+    'SSC-H': 'Side Scatter Height',
+    'SSC-W': 'Side Scatter Width',
+    'FITC-A': 'FITC Area',
+    'PE-A': 'PE Area',
+    'APC-A': 'APC Area',
+    'PerCP-A': 'PerCP Area',
+    'PE-Cy7-A': 'PE-Cy7 Area',
+    'APC-Cy7-A': 'APC-Cy7 Area'
 }
+
+# FCSParser specific configuration
+# Updated to use fcsparser instead of flowkit
+FCSPARSER_CONFIG = {
+    'read_data': True,
+    'reformat_meta': True,
+    'data_set': 0,  # For multi-data FCS files
+    'channel_naming': '$PnN',  # Use $PnN for channel names
+    'apply_compensation': False,  # Will be handled separately
+    'transform': 'linear'  # Default transform
+}
+
+# Statistics configuration
+STATS_CONFIG = {
+    'default_statistics': ['count', 'mean', 'median', 'std', 'min', 'max'],
+    'percentiles': [5, 25, 50, 75, 95],
+    'correlation_methods': ['pearson', 'spearman'],
+    'density_estimation': 'gaussian_kde'
+}
+
+# Export configuration
+EXPORT_CONFIG = {
+    'csv_separator': ',',
+    'include_metadata': True,
+    'include_statistics': True,
+    'timestamp_format': '%Y%m%d_%H%M%S',
+    'file_prefix': 'facs_analysis_'
+}
+
+def get_config_dict():
+    """Return all configuration as a dictionary"""
+    return {
+        'app': APP_CONFIG,
+        'upload': UPLOAD_CONFIG,
+        'plot': PLOT_CONFIG,
+        'gating': GATING_CONFIG,
+        'data': DATA_CONFIG,
+        'fcsparser': FCSPARSER_CONFIG,
+        'stats': STATS_CONFIG,
+        'export': EXPORT_CONFIG
+    }
+
+def validate_file_size(file_size_bytes):
+    """Validate uploaded file size"""
+    max_size_bytes = UPLOAD_CONFIG['max_file_size'] * 1024 * 1024
+    return file_size_bytes <= max_size_bytes
+
+def get_error_message(error_key):
+    """Get localized error message"""
+    return ERROR_MESSAGES.get(error_key, 'Unknown error occurred.')
+
+def get_success_message(success_key):
+    """Get localized success message"""
+    return SUCCESS_MESSAGES.get(success_key, 'Operation completed successfully.')
+
+def get_warning_message(warning_key):
+    """Get localized warning message"""
+    return WARNING_MESSAGES.get(warning_key, 'Warning: Please check your data.')
