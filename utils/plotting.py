@@ -432,3 +432,43 @@ def create_hexbin_plot(data, x_channel, y_channel, gridsize=50, title=None,
     """
     plotter = FCSPlotter(data, metadata)
     return plotter.create_hexbin_plot(x_channel, y_channel, gridsize, title, transform)
+
+class PlottingUtils:
+    """Backward compatibility class - wrapper around FCSPlotter"""
+    
+    def __init__(self, data=None, metadata=None):
+        self.plotter = FCSPlotter(data, metadata)
+        self.data = data
+        self.metadata = metadata
+    
+    def create_histogram(self, channel, bins=None, title=None, transform='linear'):
+        """Create histogram using FCSPlotter"""
+        return self.plotter.create_histogram(channel, bins, title, transform)
+    
+    def create_scatter_plot(self, x_channel, y_channel, title=None, 
+                          color_channel=None, transform='linear'):
+        """Create scatter plot using FCSPlotter"""
+        return self.plotter.create_scatter_plot(x_channel, y_channel, title, 
+                                              color_channel, transform)
+    
+    def create_density_plot(self, x_channel, y_channel, bins=50, title=None, 
+                           transform='linear'):
+        """Create density plot using FCSPlotter"""
+        return self.plotter.create_density_plot(x_channel, y_channel, bins, 
+                                               title, transform)
+    
+    def create_multi_histogram(self, channels, bins=None, transform='linear'):
+        """Create multiple histograms using FCSPlotter"""
+        return self.plotter.create_multi_histogram(channels, bins, transform)
+    
+    def create_correlation_heatmap(self, channels=None, method='pearson'):
+        """Create correlation heatmap using FCSPlotter"""
+        return self.plotter.create_correlation_heatmap(channels, method)
+    
+    def get_channel_statistics(self, channel, gate_data=None):
+        """Get channel statistics using FCSPlotter"""
+        return self.plotter.get_channel_statistics(channel, gate_data)
+    
+    def create_statistics_table(self, channels=None, gate_data=None):
+        """Create statistics table using FCSPlotter"""
+        return self.plotter.create_statistics_table(channels, gate_data)
