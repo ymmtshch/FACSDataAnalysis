@@ -338,3 +338,97 @@ def create_interactive_scatter(data, x_channel, y_channel, width=800, height=600
     )
     
     return p
+
+# モジュールレベルの便利関数（既存のFCSPlotterクラスを使用）
+def create_histogram(data, channel, bins=None, title=None, transform='linear', metadata=None):
+    """
+    Create histogram for a channel (module-level function)
+    
+    Parameters:
+    - data: pandas DataFrame
+    - channel: channel name
+    - bins: number of bins
+    - title: plot title
+    - transform: data transformation
+    - metadata: FCS metadata
+    """
+    plotter = FCSPlotter(data, metadata)
+    return plotter.create_histogram(channel, bins, title, transform)
+
+def create_scatter_plot(data, x_channel, y_channel, title=None, color_channel=None, 
+                       transform='linear', metadata=None):
+    """
+    Create scatter plot for two channels (module-level function)
+    
+    Parameters:
+    - data: pandas DataFrame
+    - x_channel: x-axis channel name
+    - y_channel: y-axis channel name
+    - title: plot title
+    - color_channel: optional color channel
+    - transform: data transformation
+    - metadata: FCS metadata
+    """
+    plotter = FCSPlotter(data, metadata)
+    return plotter.create_scatter_plot(x_channel, y_channel, title, color_channel, transform)
+
+def create_density_plot(data, x_channel, y_channel, bins=50, title=None, 
+                       transform='linear', metadata=None):
+    """
+    Create 2D density plot (module-level function)
+    
+    Parameters:
+    - data: pandas DataFrame
+    - x_channel: x-axis channel name
+    - y_channel: y-axis channel name
+    - bins: number of bins
+    - title: plot title
+    - transform: data transformation
+    - metadata: FCS metadata
+    """
+    plotter = FCSPlotter(data, metadata)
+    return plotter.create_density_plot(x_channel, y_channel, bins, title, transform)
+
+def create_multi_histogram(data, channels, bins=None, transform='linear', metadata=None):
+    """
+    Create multiple histograms (module-level function)
+    
+    Parameters:
+    - data: pandas DataFrame
+    - channels: list of channel names
+    - bins: number of bins
+    - transform: data transformation
+    - metadata: FCS metadata
+    """
+    plotter = FCSPlotter(data, metadata)
+    return plotter.create_multi_histogram(channels, bins, transform)
+
+def create_correlation_heatmap(data, channels=None, method='pearson', metadata=None):
+    """
+    Create correlation heatmap (module-level function)
+    
+    Parameters:
+    - data: pandas DataFrame
+    - channels: list of channel names
+    - method: correlation method
+    - metadata: FCS metadata
+    """
+    plotter = FCSPlotter(data, metadata)
+    return plotter.create_correlation_heatmap(channels, method)
+
+def create_hexbin_plot(data, x_channel, y_channel, gridsize=50, title=None, 
+                      transform='linear', metadata=None):
+    """
+    Create hexagonal binning plot (module-level function)
+    
+    Parameters:
+    - data: pandas DataFrame
+    - x_channel: x-axis channel name
+    - y_channel: y-axis channel name
+    - gridsize: grid size
+    - title: plot title
+    - transform: data transformation
+    - metadata: FCS metadata
+    """
+    plotter = FCSPlotter(data, metadata)
+    return plotter.create_hexbin_plot(x_channel, y_channel, gridsize, title, transform)
