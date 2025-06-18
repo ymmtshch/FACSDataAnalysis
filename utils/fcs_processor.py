@@ -227,3 +227,58 @@ class FCSProcessor:
             data = processor.subsample_data(data, max_events)
     
         return data, metadata, processor
+
+    def subsample_data(self, data: pd.DataFrame, 
+                      max_events: int = 10000) -> pd.DataFrame:
+        """
+        Subsample data for better performance
+        
+        Args:
+            data: Input dataframe
+            max_events: Maximum number of events
+            
+        Returns:
+            Subsampled dataframe
+        """
+        if len(data) <= max_events:
+            return data
+            
+        # Random sampling
+        return data.sample(n=max_events, random_state=42).reset_index(drop=True)
+
+
+# クラス外の関数として定義
+def load_and_process_fcs(uploaded_file, transformation='asinh', max_events=10000):
+    """
+    Load and process FCS file from uploaded file
+    
+    Args:
+        uploaded_file: Streamlit uploaded file object
+        transformation: Transformation to apply ('log', 'asinh', 'biexp', 'none')
+        max_events: Maximum number of events to keep
+        
+    Returns:
+        Tuple of (processed_data, metadata, processor_instance)
+    """
+    processor = FCSProcessor()
+    
+    try:
+        # Load FCS file
+        data, metadata = processor.load_fcs_file(uploaded_file)
+        
+        if data is None:
+            return None, None, None
+        
+        # Apply transformation if requested
+        if transformation != 'none':
+            data = processor.apply_transformation(data, transformation)
+        
+        # Subsample if necessary
+        if max_events and len(data) > max_events:
+            data = processor.subsample_data(data, max_events)
+        
+        return data, metadata, processor
+        
+    except Exception as e:
+        st.error(f"FCSファイルの処理中にエラーが発生しました: {str(e)}")
+        return None, None, None
