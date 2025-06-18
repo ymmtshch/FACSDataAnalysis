@@ -1,20 +1,19 @@
+"""
+FACS Data Analysis - Main Application
+Streamlit-based web application for flow cytometry data analysis
+"""
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import io
-import base64
+from utils.fcs_processor import FCSProcessor, load_and_process_fcs
+from utils.plotting import create_histogram, create_scatter_plot, create_contour_plot
+from utils.gating import GatingTool
+import config
 
-# fcsparserを使用（flowkitの軽量代替）
-try:
-    import fcsparser
-    FCS_AVAILABLE = True
-except ImportError:
-    FCS_AVAILABLE = False
-    st.error("FCSパーサーが利用できません。requirements.txtを確認してください。")
-
+# Page configuration
 st.set_page_config(
     page_title="FACS Data Analysis",
     page_icon="🔬",
@@ -22,197 +21,373 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("🔬 FACS Data Analysis")
-st.markdown("**フローサイトメトリーデータの解析ツール**")
+# Custom CSS
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .section-header {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #ff7f0e;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+    }
+    .info-box {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #1f77b4;
+        margin: 1rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# サイドバー設定
-st.sidebar.header("📁 ファイルアップロード")
+def main():
+    """Main application function"""
+    
+    # Title
+    st.markdown('<div class="main-header">🔬 FACS Data Analysis</div>', 
+                unsafe_allow_html=True)
+    st.markdown("---")
+    
+    # Initialize session state
+    if 'fcs_data' not in st.session_state:
+        st.session_state.fcs_data = None
+    if 'fcs_metadata' not in st.session_state:
+        st.session_state.fcs_metadata = None
+    if 'processor' not in st.session_state:
+        st.session_state.processor = None
+    
+    # Sidebar
+    with st.sidebar:
+        st.header("📁 ファイルアップロード")
+        
+        uploaded_file = st.file_uploader(
+            "FCSファイルを選択してください",
+            type=['fcs'],
+            help="FCS 2.0、3.0、3.1形式に対応しています"
+        )
+        
+        if uploaded_file is not None:
+            st.success("✅ ファイルがアップロードされました")
+            
+            # Processing options
+            st.header("⚙️ 処理オプション")
+            
+            transformation = st.selectbox(
+                "変換方法",
+                ["none", "log", "asinh", "biexp"],
+                help="データ変換方法を選択してください"
+            )
+            
+            max_events = st.number_input(
+                "最大イベント数",
+                min_value=1000,
+                max_value=100000,
+                value=10000,
+                step=1000,
+                help="表示する最大イベント数"
+            )
+            
+            # Process file button
+            if st.button("📊 ファイルを処理", type="primary"):
+                with st.spinner("FCSファイルを処理中..."):
+                    processor, data, metadata = load_and_process_fcs(
+                        uploaded_file, transformation, max_events
+                    )
+                    
+                    if processor is not None:
+                        st.session_state.processor = processor
+                        st.session_state.fcs_data = data
+                        st.session_state.fcs_metadata = metadata
+                        st.success("✅ 処理が完了しました")
+                        st.rerun()
+                    else:
+                        st.error("❌ ファイルの処理に失敗しました")
+    
+    # Main content area
+    if st.session_state.fcs_data is not None:
+        display_analysis_interface()
+    else:
+        display_welcome_screen()
 
-if FCS_AVAILABLE:
-    uploaded_file = st.sidebar.file_uploader(
-        "FCSファイルを選択してください",
-        type=['fcs'],
-        help="標準的なFCS 2.0/3.0/3.1ファイルに対応"
+def display_welcome_screen():
+    """Display welcome screen when no file is loaded"""
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("""
+        <div class="info-box">
+            <h3>🚀 FACS Data Analysis へようこそ</h3>
+            <p>このアプリケーションでは、フローサイトメトリー（FACS）データの解析が可能です。</p>
+            
+            <h4>📋 主な機能：</h4>
+            <ul>
+                <li>🔍 FCSファイルの読み込みと解析</li>
+                <li>📊 ヒストグラムと散布図の作成</li>
+                <li>🎯 インタラクティブなゲーティング</li>
+                <li>📈 統計解析と結果エクスポート</li>
+            </ul>
+            
+            <h4>🔧 使用方法：</h4>
+            <ol>
+                <li>左サイドバーからFCSファイルをアップロード</li>
+                <li>処理オプションを設定</li>
+                <li>「ファイルを処理」ボタンをクリック</li>
+                <li>解析結果を確認・可視化</li>
+            </ol>
+        </div>
+        """, unsafe_allow_html=True)
+
+def display_analysis_interface():
+    """Display main analysis interface"""
+    
+    data = st.session_state.fcs_data
+    metadata = st.session_state.fcs_metadata
+    processor = st.session_state.processor
+    
+    # Tabs for different analysis views
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 基本情報", "📈 可視化", "🎯 ゲーティング", "📋 統計解析"
+    ])
+    
+    with tab1:
+        display_file_info(data, metadata, processor)
+    
+    with tab2:
+        display_visualization(data)
+    
+    with tab3:
+        display_gating_interface(data)
+    
+    with tab4:
+        display_statistics(data, processor)
+
+def display_file_info(data, metadata, processor):
+    """Display file information and basic statistics"""
+    
+    st.markdown('<div class="section-header">📁 ファイル情報</div>', 
+                unsafe_allow_html=True)
+    
+    # File information
+    file_info = processor.get_file_info()
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**基本情報**")
+        info_df = pd.DataFrame([
+            ["総イベント数", f"{file_info.get('total_events', 'N/A'):,}"],
+            ["パラメータ数", file_info.get('total_parameters', 'N/A')],
+            ["取得日", file_info.get('acquisition_date', 'N/A')],
+            ["取得時刻", file_info.get('acquisition_time', 'N/A')],
+            ["サイトメーター", file_info.get('cytometer', 'N/A')]
+        ], columns=["項目", "値"])
+        st.dataframe(info_df, hide_index=True)
+    
+    with col2:
+        st.markdown("**実験情報**")
+        exp_df = pd.DataFrame([
+            ["実験名", file_info.get('experiment_name', 'N/A')],
+            ["サンプルID", file_info.get('sample_id', 'N/A')],
+            ["オペレーター", file_info.get('operator', 'N/A')],
+            ["ソフトウェア", file_info.get('software', 'N/A')]
+        ], columns=["項目", "値"])
+        st.dataframe(exp_df, hide_index=True)
+    
+    # Channel information
+    st.markdown('<div class="section-header">📋 チャンネル情報</div>', 
+                unsafe_allow_html=True)
+    
+    channel_info = processor.get_channel_info()
+    if channel_info:
+        channel_df = pd.DataFrame.from_dict(channel_info, orient='index')
+        st.dataframe(channel_df)
+    else:
+        st.info("チャンネル情報が利用できません")
+    
+    # Data preview
+    st.markdown('<div class="section-header">📊 データプレビュー</div>', 
+                unsafe_allow_html=True)
+    
+    st.dataframe(data.head(100), height=300)
+
+def display_visualization(data):
+    """Display visualization options"""
+    
+    st.markdown('<div class="section-header">📈 データ可視化</div>', 
+                unsafe_allow_html=True)
+    
+    channels = list(data.columns)
+    
+    # Visualization options
+    viz_type = st.selectbox(
+        "可視化タイプ",
+        ["ヒストグラム", "散布図", "等高線プロット"]
     )
     
-    if uploaded_file is not None:
-        try:
-            # FCSファイルの読み込み
-            with st.spinner("FCSファイルを読み込み中..."):
-                # バイトデータを一時ファイルとして処理
-                file_content = uploaded_file.read()
-                
-                # fcsparserを使用してFCSファイルを解析
-                meta, data = fcsparser.parse(file_content, meta_data_only=False, reformat_meta=True)
-                
-                # データフレームに変換
-                df = pd.DataFrame(data)
-                
-            st.success(f"✅ ファイル読み込み完了: {uploaded_file.name}")
-            
-            # ファイル情報表示
-            st.sidebar.subheader("📊 ファイル情報")
-            st.sidebar.info(f"""
-            - **イベント数**: {len(df):,}
-            - **パラメータ数**: {len(df.columns)}
-            - **ファイルサイズ**: {len(file_content):,} bytes
-            """)
-            
-            # メインコンテンツ
-            tab1, tab2, tab3 = st.tabs(["📈 基本解析", "🎯 散布図解析", "📊 統計情報"])
-            
-            with tab1:
-                st.subheader("ヒストグラム解析")
-                
-                # パラメータ選択
-                col1, col2 = st.columns([1, 1])
-                
-                with col1:
-                    param_options = list(df.columns)
-                    selected_param = st.selectbox(
-                        "解析パラメータを選択:",
-                        param_options,
-                        index=0 if param_options else 0
-                    )
-                
-                with col2:
-                    log_scale = st.checkbox("対数スケール", value=False)
-                    bins = st.slider("ビン数", min_value=50, max_value=500, value=100)
-                
-                if selected_param:
-                    # ヒストグラム作成
-                    fig = px.histogram(
-                        df, 
-                        x=selected_param,
-                        nbins=bins,
-                        title=f"{selected_param} のヒストグラム",
-                        labels={selected_param: selected_param}
-                    )
-                    
-                    if log_scale and (df[selected_param] > 0).all():
-                        fig.update_xaxes(type="log")
-                        fig.update_layout(title=f"{selected_param} のヒストグラム (対数スケール)")
-                    
-                    fig.update_layout(
-                        height=500,
-                        showlegend=False
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            with tab2:
-                st.subheader("散布図解析")
-                
-                col1, col2 = st.columns([1, 1])
-                
-                with col1:
-                    x_param = st.selectbox(
-                        "X軸パラメータ:",
-                        param_options,
-                        index=0 if len(param_options) > 0 else 0,
-                        key="x_param"
-                    )
-                
-                with col2:
-                    y_param = st.selectbox(
-                        "Y軸パラメータ:",
-                        param_options,
-                        index=1 if len(param_options) > 1 else 0,
-                        key="y_param"
-                    )
-                
-                col3, col4 = st.columns([1, 1])
-                
-                with col3:
-                    sample_size = st.slider(
-                        "表示イベント数 (サンプリング)",
-                        min_value=1000,
-                        max_value=min(50000, len(df)),
-                        value=min(10000, len(df))
-                    )
-                
-                with col4:
-                    opacity = st.slider("透明度", min_value=0.1, max_value=1.0, value=0.6)
-                
-                if x_param and y_param:
-                    # サンプリング
-                    df_sample = df.sample(n=sample_size) if len(df) > sample_size else df
-                    
-                    # 散布図作成
-                    fig = px.scatter(
-                        df_sample,
-                        x=x_param,
-                        y=y_param,
-                        title=f"{x_param} vs {y_param}",
-                        opacity=opacity
-                    )
-                    
-                    fig.update_layout(height=600)
-                    fig.update_traces(marker=dict(size=2))
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            with tab3:
-                st.subheader("統計情報")
-                
-                # 基本統計
-                st.write("**基本統計量:**")
-                st.dataframe(df.describe(), use_container_width=True)
-                
-                # データプレビュー
-                st.write("**データプレビュー (最初の100行):**")
-                st.dataframe(df.head(100), use_container_width=True)
-                
-                # CSV出力
-                st.subheader("📥 データエクスポート")
-                
-                csv_buffer = io.StringIO()
-                df.to_csv(csv_buffer, index=False)
-                csv_data = csv_buffer.getvalue()
-                
+    if viz_type == "ヒストグラム":
+        display_histogram(data, channels)
+    elif viz_type == "散布図":
+        display_scatter_plot(data, channels)
+    elif viz_type == "等高線プロット":
+        display_contour_plot(data, channels)
+
+def display_histogram(data, channels):
+    """Display histogram visualization"""
+    
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        selected_channel = st.selectbox("チャンネル選択", channels)
+        bins = st.slider("ビン数", 20, 200, 50)
+        log_scale = st.checkbox("対数スケール")
+    
+    with col2:
+        fig = px.histogram(
+            data, 
+            x=selected_channel, 
+            nbins=bins,
+            title=f"{selected_channel} ヒストグラム"
+        )
+        
+        if log_scale:
+            fig.update_layout(yaxis_type="log")
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+def display_scatter_plot(data, channels):
+    """Display scatter plot visualization"""
+    
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        x_channel = st.selectbox("X軸", channels, index=0)
+        y_channel = st.selectbox("Y軸", channels, index=1 if len(channels) > 1 else 0)
+        alpha = st.slider("透明度", 0.1, 1.0, 0.6)
+        sample_size = st.slider("サンプルサイズ", 1000, len(data), min(10000, len(data)))
+    
+    with col2:
+        # Subsample for better performance
+        plot_data = data.sample(n=min(sample_size, len(data)))
+        
+        fig = px.scatter(
+            plot_data,
+            x=x_channel,
+            y=y_channel,
+            title=f"{x_channel} vs {y_channel}",
+            opacity=alpha
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+def display_contour_plot(data, channels):
+    """Display contour plot visualization"""
+    
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        x_channel = st.selectbox("X軸", channels, index=0, key="contour_x")
+        y_channel = st.selectbox("Y軸", channels, index=1 if len(channels) > 1 else 0, key="contour_y")
+        nbins = st.slider("密度計算ビン数", 20, 100, 50)
+    
+    with col2:
+        fig = go.Figure()
+        
+        fig.add_trace(go.Histogram2dContour(
+            x=data[x_channel],
+            y=data[y_channel],
+            nbinsx=nbins,
+            nbinsy=nbins,
+            contours_coloring='fill',
+            contours_showlabels=True
+        ))
+        
+        fig.update_layout(
+            title=f"{x_channel} vs {y_channel} 密度プロット",
+            xaxis_title=x_channel,
+            yaxis_title=y_channel
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+def display_gating_interface(data):
+    """Display gating interface"""
+    
+    st.markdown('<div class="section-header">🎯 ゲーティング解析</div>', 
+                unsafe_allow_html=True)
+    
+    st.info("ゲーティング機能は開発中です。高度なゲーティング機能については、advanced_gating.pyページをご確認ください。")
+    
+    # Simple threshold gating example
+    channels = list(data.columns)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        gate_channel = st.selectbox("ゲートチャンネル", channels)
+        threshold = st.number_input(
+            "閾値",
+            value=float(data[gate_channel].median()),
+            step=float(data[gate_channel].std() / 10)
+        )
+    
+    with col2:
+        # Apply simple threshold gate
+        gated_data = data[data[gate_channel] > threshold]
+        
+        st.metric("元データ", f"{len(data):,} events")
+        st.metric("ゲート後", f"{len(gated_data):,} events")
+        st.metric("ゲート率", f"{len(gated_data)/len(data)*100:.1f}%")
+
+def display_statistics(data, processor):
+    """Display statistical analysis"""
+    
+    st.markdown('<div class="section-header">📋 統計解析</div>', 
+                unsafe_allow_html=True)
+    
+    # Basic statistics for all channels
+    stats = processor.get_basic_stats()
+    
+    if stats:
+        stats_df = pd.DataFrame.from_dict(stats, orient='index')
+        stats_df = stats_df.round(2)
+        
+        st.markdown("**全チャンネル統計情報**")
+        st.dataframe(stats_df)
+        
+        # Export options
+        st.markdown('<div class="section-header">💾 データエクスポート</div>', 
+                    unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("📊 統計データをダウンロード"):
+                csv_stats = stats_df.to_csv()
                 st.download_button(
-                    label="📁 CSVファイルとしてダウンロード",
-                    data=csv_data,
-                    file_name=f"{uploaded_file.name.replace('.fcs', '')}_analyzed.csv",
+                    label="CSV形式でダウンロード",
+                    data=csv_stats,
+                    file_name="facs_statistics.csv",
                     mime="text/csv"
                 )
-                
-        except Exception as e:
-            st.error(f"❌ ファイル処理エラー: {str(e)}")
-            st.info("ファイル形式を確認してください。標準的なFCS 2.0/3.0/3.1ファイルが必要です。")
-    
-    else:
-        st.info("👆 左のサイドバーからFCSファイルをアップロードしてください。")
         
-        # デモデータの説明
-        st.markdown("""
-        ## 🔬 FACS Data Analysis について
-        
-        このアプリケーションは、フローサイトメトリー（FACS）データの基本的な解析を行うツールです。
-        
-        ### 📋 主な機能:
-        - **FCSファイル読み込み**: 標準的なFCS 2.0/3.0/3.1ファイルに対応
-        - **ヒストグラム解析**: 各パラメータの分布を可視化
-        - **散布図解析**: 2つのパラメータの相関を解析
-        - **統計情報**: 基本統計量とデータプレビュー
-        - **データエクスポート**: 解析結果をCSV形式で出力
-        
-        ### 🚀 使用方法:
-        1. 左のサイドバーからFCSファイルをアップロード
-        2. 各タブで解析を実行
-        3. 必要に応じて結果をダウンロード
-        """)
+        with col2:
+            if st.button("📋 生データをダウンロード"):
+                csv_data = processor.export_data(data)
+                st.download_button(
+                    label="CSV形式でダウンロード",
+                    data=csv_data,
+                    file_name="facs_raw_data.csv",
+                    mime="text/csv"
+                )
 
-else:
-    st.error("""
-    ❌ **FCSパーサーライブラリが利用できません**
-    
-    requirements.txtに以下を追加してください:
-    ```
-    fcsparser==0.2.8
-    ```
-    """)
-
-# フッター
-st.markdown("---")
-st.markdown("**FACS Data Analysis** - Streamlit Cloud対応版")
+if __name__ == "__main__":
+    main()
