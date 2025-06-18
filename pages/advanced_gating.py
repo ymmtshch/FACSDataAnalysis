@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import fcsparser
 from utils.fcs_processor import FCSProcessor
-from utils.plotting import PlottingUtils
+from utils.plotting import PlottingUtils  # 新しく追加したクラスを使用
 from utils.gating import GatingUtils
 import plotly.express as px
 import plotly.graph_objects as go
