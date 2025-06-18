@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from utils.fcs_processor import FCSProcessor, load_and_process_fcs
 from utils.plotting import create_histogram, create_scatter_plot
-from utils.gating import GatingTool
+#from utils.gating import GatingTool
 import config
 
 # Page configuration
