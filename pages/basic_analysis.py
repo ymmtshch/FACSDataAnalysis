@@ -40,10 +40,40 @@ def read_fcs_file(file_path):
             
             # データの取得
             events = fcs_data.events
-            channel_names = fcs_data.channels['PnN']
+            
+            # チャンネル名の取得（FlowIOの正しい方法）
+            channel_names = []
+            for i in range(fcs_data.channel_count):
+                # まずPnN (チャンネル名)を試す
+                channel_name_key = f'$P{i+1}N'
+                channel_short_key = f'$P{i+1}S'  # ショート名
+                
+                if channel_name_key in fcs_data.text and fcs_data.text[channel_name_key].strip():
+                    channel_names.append(fcs_data.text[channel_name_key].strip())
+                elif channel_short_key in fcs_data.text and fcs_data.text[channel_short_key].strip():
+                    channel_names.append(fcs_data.text[channel_short_key].strip())
+                else:
+                    # どちらもない場合はデフォルト名を使用
+                    channel_names.append(f'Channel_{i+1}')
+            
+            # チャンネル名が重複している場合の処理
+            seen = set()
+            unique_channel_names = []
+            for name in channel_names:
+                if name in seen:
+                    counter = 2
+                    new_name = f"{name}_{counter}"
+                    while new_name in seen:
+                        counter += 1
+                        new_name = f"{name}_{counter}"
+                    unique_channel_names.append(new_name)
+                    seen.add(new_name)
+                else:
+                    unique_channel_names.append(name)
+                    seen.add(name)
             
             # DataFrameに変換
-            data = pd.DataFrame(events, columns=channel_names)
+            data = pd.DataFrame(events, columns=unique_channel_names)
             
             return meta, data
             
@@ -106,6 +136,13 @@ def main():
             try:
                 # FCSファイルを読み込み
                 meta, data = read_fcs_file(tmp_file_path)
+                
+                # デバッグ情報
+                st.sidebar.write(f"チャンネル数: {len(data.columns)}")
+                if st.sidebar.checkbox("チャンネル名を表示"):
+                    st.sidebar.write("チャンネル名:")
+                    for i, col in enumerate(data.columns):
+                        st.sidebar.write(f"{i+1}: {col}")
                 
                 # DataFrameに変換（必要に応じて）
                 if not isinstance(data, pd.DataFrame):
