@@ -220,11 +220,18 @@ Streamlitアプリケーションの基本設定：
 ```toml
 [server]
 maxUploadSize = 100
+headless = true
+enableCORS = false
+enableXsrfProtection = false
 
 [theme]
 primaryColor = "#1f77b4"
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+
+[browser]
+gatherUsageStats = false
 ```
 
 ## 🔧 開発・拡張
