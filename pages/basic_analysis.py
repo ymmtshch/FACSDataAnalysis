@@ -38,8 +38,55 @@ def read_fcs_file(file_path):
             for key, value in fcs_data.text.items():
                 meta[key] = value
             
-            # データの取得
+            # データの取得とデバッグ情報
             events = fcs_data.events
+            
+            # デバッグ情報の表示
+            st.sidebar.write(f"デバッグ情報:")
+            st.sidebar.write(f"- イベントタイプ: {type(events)}")
+            st.sidebar.write(f"- チャンネル数: {fcs_data.channel_count}")
+            
+            # array.array を NumPy配列に変換
+            try:
+                if hasattr(events, 'dtype'):
+                    # 既にNumPy配列の場合
+                    events_array = events
+                    st.sidebar.write(f"- データ形状: {events_array.shape}")
+                else:
+                    # array.array の場合、NumPy配列に変換
+                    events_array = np.array(events)
+                    st.sidebar.write(f"- 変換後データ形状: {events_array.shape}")
+                
+                # 2次元配列に変換（必要に応じて）
+                if events_array.ndim == 1:
+                    # 1次元配列の場合、チャンネル数で分割
+                    total_events = len(events_array) // fcs_data.channel_count
+                    events_array = events_array.reshape(total_events, fcs_data.channel_count)
+                    st.sidebar.write(f"- 再整形後: {events_array.shape}")
+                
+            except Exception as conversion_error:
+                st.error(f"データ変換エラー: {str(conversion_error)}")
+                st.write("FlowIOの代替方法を試します...")
+                
+                # 代替方法: データを手動で処理
+                try:
+                    # eventsがlistの場合
+                    if isinstance(events, (list, tuple)):
+                        events_array = np.array(events)
+                    else:
+                        # array.arrayの場合、tolist()してからnumpy配列に変換
+                        events_list = events.tolist() if hasattr(events, 'tolist') else list(events)
+                        events_array = np.array(events_list)
+                    
+                    # 2次元配列に変換
+                    if events_array.ndim == 1:
+                        total_events = len(events_array) // fcs_data.channel_count
+                        events_array = events_array.reshape(total_events, fcs_data.channel_count)
+                    
+                    st.sidebar.write(f"- 代替方法成功: {events_array.shape}")
+                    
+                except Exception as alt_error:
+                    raise Exception(f"データ変換に失敗しました: {str(alt_error)}")
             
             # チャンネル名の取得（FlowIOの正しい方法）
             channel_names = []
@@ -73,7 +120,7 @@ def read_fcs_file(file_path):
                     seen.add(name)
             
             # DataFrameに変換
-            data = pd.DataFrame(events, columns=unique_channel_names)
+            data = pd.DataFrame(events_array, columns=unique_channel_names)
             
             return meta, data
             
