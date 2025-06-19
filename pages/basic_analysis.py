@@ -7,6 +7,8 @@ from utils.plotting import PlottingUtils  # 新しく追加したクラスを使
 import plotly.express as px
 import plotly.graph_objects as go
 from config import Config
+import tempfile
+import os
 
 def main():
     st.title("基本解析")
@@ -26,14 +28,25 @@ def main():
     try:
         # FCSファイルの読み込み (fcsparserを使用)
         with st.spinner("FCSファイルを読み込み中..."):
-            # fcsparserでファイルを読み込み
-            meta, data = fcsparser.parse(uploaded_file, meta_data_only=False, reformat_meta=True)
+            # UploadedFileを一時ファイルに保存してからfcsparserで読み込み
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.fcs') as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_file_path = tmp_file.name
             
-            # FCSProcessorインスタンスを作成
-            processor = FCSProcessor()
-            
-            # データの前処理
-            df_processed = processor.preprocess_data(data, meta)
+            try:
+                # fcsparserでファイルを読み込み
+                meta, data = fcsparser.parse(tmp_file_path, meta_data_only=False, reformat_meta=True)
+                
+                # FCSProcessorインスタンスを作成
+                processor = FCSProcessor()
+                
+                # データの前処理
+                df_processed = processor.preprocess_data(data, meta)
+                
+            finally:
+                # 一時ファイルを削除
+                if os.path.exists(tmp_file_path):
+                    os.unlink(tmp_file_path)
             
         st.success(f"✅ ファイル読み込み完了: {uploaded_file.name}")
         
