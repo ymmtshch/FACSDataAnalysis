@@ -121,6 +121,72 @@ EXPORT_CONFIG = {
     'file_prefix': 'facs_analysis_'
 }
 
+# Configクラスを追加（advanced_gating.py の互換性のため）
+class Config:
+    """Configuration class for backward compatibility"""
+    
+    # App settings
+    APP_TITLE = APP_CONFIG['title']
+    PAGE_TITLE = APP_CONFIG['page_title']
+    PAGE_ICON = APP_CONFIG['page_icon']
+    
+    # File upload settings
+    MAX_FILE_SIZE = UPLOAD_CONFIG['max_file_size']
+    ALLOWED_EXTENSIONS = UPLOAD_CONFIG['allowed_extensions']
+    
+    # Plot settings
+    DEFAULT_BINS = PLOT_CONFIG['default_bins']
+    MAX_BINS = PLOT_CONFIG['max_bins']
+    DEFAULT_ALPHA = PLOT_CONFIG['default_alpha']
+    COLORMAP_OPTIONS = PLOT_CONFIG['colormap_options']
+    DEFAULT_COLORMAP = PLOT_CONFIG['default_colormap']
+    
+    # Gating settings
+    GATE_COLORS = GATING_CONFIG['gate_colors']
+    DEFAULT_GATE_COLOR = GATING_CONFIG['default_gate_color']
+    GATE_LINE_WIDTH = GATING_CONFIG['gate_line_width']
+    GATE_ALPHA = GATING_CONFIG['gate_alpha']
+    MIN_GATE_POINTS = GATING_CONFIG['min_gate_points']
+    
+    # Data processing settings
+    MAX_EVENTS_DISPLAY = DATA_CONFIG['max_events_display']
+    SUBSAMPLE_FOR_PLOT = DATA_CONFIG['subsample_for_plot']
+    DEFAULT_SUBSAMPLE_SIZE = DATA_CONFIG['default_subsample_size']
+    TRANSFORM_METHODS = DATA_CONFIG['transform_methods']
+    
+    # Channel mappings
+    CHANNEL_MAPPINGS = CHANNEL_MAPPINGS
+    
+    @classmethod
+    def get_error_message(cls, error_key):
+        """Get error message by key"""
+        return ERROR_MESSAGES.get(error_key, 'Unknown error occurred.')
+    
+    @classmethod
+    def get_success_message(cls, success_key):
+        """Get success message by key"""
+        return SUCCESS_MESSAGES.get(success_key, 'Operation completed successfully.')
+    
+    @classmethod
+    def get_warning_message(cls, warning_key):
+        """Get warning message by key"""
+        return WARNING_MESSAGES.get(warning_key, 'Warning: Please check your data.')
+    
+    @classmethod
+    def get_gate_colors(cls):
+        """Get available gate colors"""
+        return cls.GATE_COLORS
+    
+    @classmethod
+    def get_transform_methods(cls):
+        """Get available transform methods"""
+        return cls.TRANSFORM_METHODS
+    
+    @classmethod
+    def get_colormap_options(cls):
+        """Get available colormap options"""
+        return cls.COLORMAP_OPTIONS
+
 def get_config_dict():
     """Return all configuration as a dictionary"""
     return {
