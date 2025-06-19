@@ -1,18 +1,88 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import fcsparser
+import tempfile
+import os
+
+# FlowIOまたはFlowKitが利用可能かチェック
+try:
+    import flowio
+    FCS_LIBRARY = "flowio"
+except ImportError:
+    try:
+        import flowkit as fk
+        FCS_LIBRARY = "flowkit"
+    except ImportError:
+        try:
+            import fcsparser
+            FCS_LIBRARY = "fcsparser"
+        except ImportError:
+            st.error("FCS読み込みライブラリが見つかりません。flowio, flowkit, または fcsparser をインストールしてください。")
+            st.stop()
+
 from utils.fcs_processor import FCSProcessor
-from utils.plotting import PlottingUtils  # 新しく追加したクラスを使用
+from utils.plotting import PlottingUtils
 import plotly.express as px
 import plotly.graph_objects as go
 from config import Config
-import tempfile
-import os
+
+def read_fcs_file(file_path):
+    """FCSファイルを読み込む関数（利用可能なライブラリに応じて選択）"""
+    try:
+        if FCS_LIBRARY == "flowio":
+            # FlowIOを使用
+            fcs_data = flowio.FlowData(file_path)
+            
+            # メタデータの取得
+            meta = {}
+            for key, value in fcs_data.text.items():
+                meta[key] = value
+            
+            # データの取得
+            events = fcs_data.events
+            channel_names = fcs_data.channels['PnN']
+            
+            # DataFrameに変換
+            data = pd.DataFrame(events, columns=channel_names)
+            
+            return meta, data
+            
+        elif FCS_LIBRARY == "flowkit":
+            # FlowKitを使用
+            sample = fk.Sample(file_path)
+            
+            # メタデータの取得
+            meta = sample.metadata
+            
+            # データの取得（NumPy配列として）
+            events = sample.as_dataframe()
+            
+            return meta, events
+            
+        elif FCS_LIBRARY == "fcsparser":
+            # fcsparserを使用（NumPy 2.0互換性の問題がある可能性）
+            try:
+                # NumPy 1.xに一時的にダウングレードが必要かもしれません
+                meta, data = fcsparser.parse(file_path, meta_data_only=False, reformat_meta=True)
+                return meta, data
+            except AttributeError as e:
+                if "newbyteorder" in str(e):
+                    st.error("fcsparserがNumPy 2.0と互換性がありません。以下のコマンドでFlowIOをインストールしてください：")
+                    st.code("pip install flowio")
+                    st.stop()
+                else:
+                    raise e
+                    
+    except Exception as e:
+        st.error(f"FCSファイルの読み込みエラー: {str(e)}")
+        raise e
 
 def main():
     st.title("基本解析")
     st.write("FCSファイルの基本的な解析と可視化を行います。")
+    
+    # 使用中のライブラリを表示
+    st.sidebar.info(f"FCS読み込みライブラリ: {FCS_LIBRARY}")
     
     # サイドバーでファイルアップロード
     uploaded_file = st.sidebar.file_uploader(
@@ -26,16 +96,20 @@ def main():
         return
     
     try:
-        # FCSファイルの読み込み (fcsparserを使用)
+        # FCSファイルの読み込み
         with st.spinner("FCSファイルを読み込み中..."):
-            # UploadedFileを一時ファイルに保存してからfcsparserで読み込み
+            # UploadedFileを一時ファイルに保存
             with tempfile.NamedTemporaryFile(delete=False, suffix='.fcs') as tmp_file:
                 tmp_file.write(uploaded_file.read())
                 tmp_file_path = tmp_file.name
             
             try:
-                # fcsparserでファイルを読み込み
-                meta, data = fcsparser.parse(tmp_file_path, meta_data_only=False, reformat_meta=True)
+                # FCSファイルを読み込み
+                meta, data = read_fcs_file(tmp_file_path)
+                
+                # DataFrameに変換（必要に応じて）
+                if not isinstance(data, pd.DataFrame):
+                    data = pd.DataFrame(data)
                 
                 # FCSProcessorインスタンスを作成
                 processor = FCSProcessor()
@@ -60,7 +134,7 @@ def main():
             st.metric("パラメータ数", len(df_processed.columns))
         with col3:
             try:
-                acquisition_date = meta.get('$DATE', 'N/A')
+                acquisition_date = meta.get('$DATE', meta.get('date', 'N/A'))
                 st.metric("取得日", acquisition_date)
             except:
                 st.metric("取得日", "N/A")
@@ -74,21 +148,35 @@ def main():
                 if key in meta:
                     meta_display[key] = meta[key]
             
+            # FlowKitの場合は異なるキー名を試す
+            if not meta_display and FCS_LIBRARY == "flowkit":
+                flowkit_keys = ['tot', 'par', 'date', 'btim', 'etim', 'cyt', 'cytnum']
+                for key in flowkit_keys:
+                    if key in meta:
+                        meta_display[f'${key.upper()}'] = meta[key]
+            
             if meta_display:
                 st.json(meta_display)
             else:
-                st.write("メタデータが見つかりません")
+                st.write("主要なメタデータが見つかりません")
+                # 全メタデータを表示
+                if st.checkbox("全メタデータを表示"):
+                    st.json(dict(list(meta.items())[:20]))  # 最初の20項目のみ表示
         
         # チャンネル選択
         st.subheader("🎯 チャンネル選択")
         channels = list(df_processed.columns)
+        
+        if not channels:
+            st.error("データにチャンネルが見つかりません")
+            return
         
         col1, col2 = st.columns(2)
         with col1:
             x_channel = st.selectbox(
                 "X軸チャンネル",
                 channels,
-                index=0 if channels else 0
+                index=0
             )
         with col2:
             y_channel = st.selectbox(
@@ -249,7 +337,11 @@ def main():
 
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
-        st.error("ファイルが正しいFCS形式であることを確認してください。")
+        
+        # ライブラリの推奨事項を表示
+        if FCS_LIBRARY == "fcsparser":
+            st.info("💡 より安定したFCS読み込みのため、以下のコマンドでFlowIOをインストールすることをお勧めします：")
+            st.code("pip install flowio")
         
         if st.expander("エラー詳細"):
             st.exception(e)
