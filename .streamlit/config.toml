@@ -15,7 +15,7 @@ maxUploadSize = 100
 maxMessageSize = 100
 enableWebsocketCompression = false
 runOnSave = false
-fileWatcherType = "auto"
+fileWatcherType = "none"
 
 [browser]
 # Browser settings
