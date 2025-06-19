@@ -196,6 +196,10 @@ exports/
 .DS_Store
 Thumbs.db
 
+# Windows specific
+Desktop.ini
+ehthumbs.db
+
 # Logs
 logs/
 *.log
