@@ -1,9 +1,6 @@
-# utils/fcs_processor.py の修正版
-
 """
-FCS file processing utilities using fcsparser
+FCS file processing utilities with multi-library support
 """
-import fcsparser
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -11,16 +8,88 @@ from typing import Tuple, Dict, Any, Optional
 import io
 
 class FCSProcessor:
-    """FCS file processor using fcsparser library"""
+    """FCS file processor with automatic library selection"""
     
     def __init__(self):
         self.data = None
         self.metadata = None
         self.channels = None
+        self.used_library = None
+        
+    def _try_flowio(self, file_path_or_buffer):
+        """Try loading with flowio library"""
+        try:
+            import flowio
+            
+            # Reset buffer position if it's a buffer
+            if hasattr(file_path_or_buffer, 'seek'):
+                file_path_or_buffer.seek(0)
+                
+            fcs = flowio.FlowData(file_path_or_buffer)
+            
+            # Convert to pandas DataFrame
+            data = pd.DataFrame(fcs.events, columns=fcs.channels['PnN'])
+            metadata = fcs.text
+            
+            self.used_library = 'flowio'
+            return data, metadata
+            
+        except ImportError:
+            return None, None
+        except Exception as e:
+            st.debug(f"flowio loading failed: {str(e)}")
+            return None, None
+    
+    def _try_flowkit(self, file_path_or_buffer):
+        """Try loading with flowkit library"""
+        try:
+            import flowkit
+            
+            # Reset buffer position if it's a buffer
+            if hasattr(file_path_or_buffer, 'seek'):
+                file_path_or_buffer.seek(0)
+                
+            sample = flowkit.Sample(file_path_or_buffer)
+            
+            # Get data and metadata
+            data = sample.as_dataframe()
+            metadata = sample.metadata
+            
+            self.used_library = 'flowkit'
+            return data, metadata
+            
+        except ImportError:
+            return None, None
+        except Exception as e:
+            st.debug(f"flowkit loading failed: {str(e)}")
+            return None, None
+    
+    def _try_fcsparser(self, file_path_or_buffer):
+        """Try loading with fcsparser library"""
+        try:
+            import fcsparser
+            
+            # Reset buffer position if it's a buffer
+            if hasattr(file_path_or_buffer, 'seek'):
+                file_path_or_buffer.seek(0)
+                
+            metadata, data = fcsparser.parse(file_path_or_buffer, 
+                                           meta_data_only=False, 
+                                           output_format='DataFrame')
+            
+            self.used_library = 'fcsparser'
+            return data, metadata
+            
+        except ImportError:
+            return None, None
+        except Exception as e:
+            st.debug(f"fcsparser loading failed: {str(e)}")
+            return None, None
         
     def load_fcs_file(self, file_path_or_buffer) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
-        Load FCS file using fcsparser
+        Load FCS file using automatic library selection
+        Priority: flowio → flowkit → fcsparser
         
         Args:
             file_path_or_buffer: File path or buffer object
@@ -28,28 +97,29 @@ class FCSProcessor:
         Returns:
             Tuple of (data_dataframe, metadata_dict)
         """
-        try:
-            # Parse FCS file
-            if hasattr(file_path_or_buffer, 'read'):
-                # Handle uploaded file buffer
-                metadata, data = fcsparser.parse(file_path_or_buffer, 
-                                               meta_data_only=False, 
-                                               output_format='DataFrame')
-            else:
-                # Handle file path
-                metadata, data = fcsparser.parse(file_path_or_buffer, 
-                                               meta_data_only=False, 
-                                               output_format='DataFrame')
-            
-            self.data = data
-            self.metadata = metadata
-            self.channels = list(data.columns)
-            
-            return data, metadata
-            
-        except Exception as e:
-            st.error(f"FCSファイルの読み込みに失敗しました: {str(e)}")
-            return None, None
+        # Try libraries in order of preference
+        loaders = [
+            ('flowio', self._try_flowio),
+            ('flowkit', self._try_flowkit),
+            ('fcsparser', self._try_fcsparser)
+        ]
+        
+        for lib_name, loader_func in loaders:
+            try:
+                data, metadata = loader_func(file_path_or_buffer)
+                if data is not None and metadata is not None:
+                    self.data = data
+                    self.metadata = metadata
+                    self.channels = list(data.columns)
+                    st.sidebar.success(f"使用ライブラリ: {lib_name}")
+                    return data, metadata
+            except Exception as e:
+                st.sidebar.warning(f"{lib_name} での読み込みに失敗: {str(e)}")
+                continue
+        
+        # All libraries failed
+        st.error("すべてのFCS読み込みライブラリで失敗しました。flowio、flowkit、fcsparserのいずれかをインストールしてください。")
+        return None, None
     
     def get_file_info(self) -> Dict[str, Any]:
         """
@@ -63,16 +133,27 @@ class FCSProcessor:
         
         info = {}
         
-        # Extract common FCS metadata
-        info['total_events'] = self.metadata.get('$TOT', 'N/A')
-        info['total_parameters'] = self.metadata.get('$PAR', 'N/A')
-        info['acquisition_date'] = self.metadata.get('$DATE', 'N/A')
-        info['acquisition_time'] = self.metadata.get('$BTIM', 'N/A')
-        info['cytometer'] = self.metadata.get('$CYT', 'N/A')
+        # Handle different library metadata formats
+        if self.used_library == 'flowkit':
+            # flowkit uses lowercase keys
+            info['total_events'] = self.metadata.get('tot', self.metadata.get('$TOT', 'N/A'))
+            info['total_parameters'] = self.metadata.get('par', self.metadata.get('$PAR', 'N/A'))
+            info['acquisition_date'] = self.metadata.get('date', self.metadata.get('$DATE', 'N/A'))
+            info['acquisition_time'] = self.metadata.get('btim', self.metadata.get('$BTIM', 'N/A'))
+            info['cytometer'] = self.metadata.get('cyt', self.metadata.get('$CYT', 'N/A'))
+        else:
+            # Standard FCS metadata keys
+            info['total_events'] = self.metadata.get('$TOT', 'N/A')
+            info['total_parameters'] = self.metadata.get('$PAR', 'N/A')
+            info['acquisition_date'] = self.metadata.get('$DATE', 'N/A')
+            info['acquisition_time'] = self.metadata.get('$BTIM', 'N/A')
+            info['cytometer'] = self.metadata.get('$CYT', 'N/A')
+        
         info['experiment_name'] = self.metadata.get('$EXP', 'N/A')
         info['sample_id'] = self.metadata.get('SAMPLE ID', 'N/A')
         info['operator'] = self.metadata.get('$OP', 'N/A')
         info['software'] = self.metadata.get('$SRC', 'N/A')
+        info['used_library'] = self.used_library
         
         return info
     
@@ -95,15 +176,22 @@ class FCSProcessor:
                 param_num = key[2:-1]  # Extract parameter number
                 channel_name = value
                 
+                # Handle duplicate channel names
+                original_name = channel_name
+                counter = 2
+                while channel_name in channel_info:
+                    channel_name = f"{original_name}_{counter}"
+                    counter += 1
+                
                 # Initialize channel info
-                if channel_name not in channel_info:
-                    channel_info[channel_name] = {
-                        'name': channel_name,
-                        'parameter': param_num,
-                        'range': None,
-                        'gain': None,
-                        'voltage': None
-                    }
+                channel_info[channel_name] = {
+                    'name': channel_name,
+                    'original_name': original_name,
+                    'parameter': param_num,
+                    'range': None,
+                    'gain': None,
+                    'voltage': None
+                }
                 
                 # Look for additional parameter information
                 range_key = f'$P{param_num}R'
@@ -151,32 +239,123 @@ class FCSProcessor:
             # Return stats for all channels
             stats = {}
             for col in self.data.columns:
-                stats[col] = {
-                    'count': len(self.data[col]),
-                    'mean': float(self.data[col].mean()),
-                    'median': float(self.data[col].median()),
-                    'std': float(self.data[col].std()),
-                    'min': float(self.data[col].min()),
-                    'max': float(self.data[col].max()),
-                    'q25': float(self.data[col].quantile(0.25)),
-                    'q75': float(self.data[col].quantile(0.75))
-                }
+                try:
+                    stats[col] = {
+                        'count': len(self.data[col]),
+                        'mean': float(self.data[col].mean()),
+                        'median': float(self.data[col].median()),
+                        'std': float(self.data[col].std()),
+                        'min': float(self.data[col].min()),
+                        'max': float(self.data[col].max()),
+                        'q25': float(self.data[col].quantile(0.25)),
+                        'q75': float(self.data[col].quantile(0.75))
+                    }
+                except Exception as e:
+                    st.warning(f"統計計算エラー ({col}): {str(e)}")
+                    stats[col] = {'error': str(e)}
             return stats
+    
+    def preprocess_data(self, data: pd.DataFrame, meta: Dict[str, Any]) -> pd.DataFrame:
+        """
+        Preprocess raw FCS data
+        
+        Args:
+            data: Raw FCS data
+            meta: FCS metadata
+            
+        Returns:
+            Preprocessed DataFrame
+        """
+        processed_data = data.copy()
+        
+        # Handle different data types from different libraries
+        if self.used_library == 'flowio':
+            # flowio might return array.array objects
+            for col in processed_data.columns:
+                if hasattr(processed_data[col].iloc[0], '__iter__') and not isinstance(processed_data[col].iloc[0], str):
+                    try:
+                        processed_data[col] = processed_data[col].apply(lambda x: np.array(x) if hasattr(x, '__iter__') else x)
+                    except:
+                        pass
+        
+        # Ensure all columns are numeric
+        for col in processed_data.columns:
+            try:
+                processed_data[col] = pd.to_numeric(processed_data[col], errors='coerce')
+            except:
+                pass
+        
+        # Remove any rows with all NaN values
+        processed_data = processed_data.dropna(how='all')
+        
+        return processed_data
+    
+    def apply_transform(self, data: pd.Series, transform_type: str) -> pd.Series:
+        """
+        Apply transformation to a single data series
+        
+        Args:
+            data: Input data series
+            transform_type: Type of transformation ('Log10', 'Asinh', 'Biexponential', 'none')
+            
+        Returns:
+            Transformed data series
+        """
+        if transform_type == 'none' or transform_type is None:
+            return data
+            
+        try:
+            if transform_type == 'Log10':
+                # Log10 transformation (avoid log of negative values)
+                positive_data = np.maximum(data, 1)
+                return np.log10(positive_data)
+                
+            elif transform_type == 'Asinh':
+                # Inverse hyperbolic sine transformation
+                return np.arcsinh(data / 150)
+                
+            elif transform_type == 'Biexponential':
+                # Biexponential transformation (simplified version)
+                result = data.copy()
+                pos_mask = data > 0
+                neg_mask = data <= 0
+                
+                result[pos_mask] = np.log10(data[pos_mask])
+                result[neg_mask] = -np.log10(-data[neg_mask] + 1)
+                
+                return result
+            else:
+                st.warning(f"未知の変換タイプ: {transform_type}")
+                return data
+                
+        except Exception as e:
+            st.error(f"データ変換エラー ({transform_type}): {str(e)}")
+            return data
     
     def apply_transformation(self, data: pd.DataFrame, 
                            transformation: str, 
                            channels: list = None) -> pd.DataFrame:
         """
-        Apply transformation to data
+        Apply transformation to multiple channels (backward compatibility)
         
         Args:
             data: Input dataframe
-            transformation: Type of transformation ('log', 'asinh', 'biexp')
+            transformation: Type of transformation ('log', 'asinh', 'biexp', 'Log10', 'Asinh', 'Biexponential')
             channels: List of channels to transform, if None transform all
             
         Returns:
             Transformed dataframe
         """
+        # Convert old naming to new naming
+        transform_map = {
+            'log': 'Log10',
+            'asinh': 'Asinh', 
+            'biexp': 'Biexponential'
+        }
+        
+        if transformation in transform_map:
+            transformation = transform_map[transformation]
+        
         if channels is None:
             channels = data.columns.tolist()
             
@@ -184,25 +363,7 @@ class FCSProcessor:
         
         for channel in channels:
             if channel in data.columns:
-                if transformation == 'log':
-                    # Log transformation (avoid log of negative values)
-                    positive_data = np.maximum(data[channel], 1)
-                    data_transformed[channel] = np.log10(positive_data)
-                    
-                elif transformation == 'asinh':
-                    # Inverse hyperbolic sine transformation
-                    data_transformed[channel] = np.arcsinh(data[channel] / 150)
-                    
-                elif transformation == 'biexp':
-                    # Biexponential transformation (simplified version)
-                    # This is a simplified implementation
-                    pos_mask = data[channel] > 0
-                    neg_mask = data[channel] <= 0
-                    
-                    data_transformed.loc[pos_mask, channel] = np.log10(
-                        data.loc[pos_mask, channel])
-                    data_transformed.loc[neg_mask, channel] = -np.log10(
-                        -data.loc[neg_mask, channel] + 1)
+                data_transformed[channel] = self.apply_transform(data[channel], transformation)
         
         return data_transformed
     
@@ -241,14 +402,13 @@ class FCSProcessor:
             return data.to_csv(index=False)
 
 
-# Module-level function (kept outside class)
-def load_and_process_fcs(uploaded_file, transformation='asinh', max_events=10000):
+def load_and_process_fcs(uploaded_file, transformation='Asinh', max_events=10000):
     """
     Load and process FCS file from uploaded file
     
     Args:
         uploaded_file: Streamlit uploaded file object
-        transformation: Transformation to apply ('log', 'asinh', 'biexp', 'none')
+        transformation: Transformation to apply ('Log10', 'Asinh', 'Biexponential', 'none')
         max_events: Maximum number of events to keep
         
     Returns:
@@ -257,11 +417,14 @@ def load_and_process_fcs(uploaded_file, transformation='asinh', max_events=10000
     processor = FCSProcessor()
     
     try:
-        # Load FCS file
+        # Load FCS file with automatic library selection
         data, metadata = processor.load_fcs_file(uploaded_file)
         
         if data is None:
             return None, None, None
+        
+        # Preprocess data
+        data = processor.preprocess_data(data, metadata)
         
         # Apply transformation if requested
         if transformation != 'none':
@@ -275,4 +438,5 @@ def load_and_process_fcs(uploaded_file, transformation='asinh', max_events=10000
         
     except Exception as e:
         st.error(f"FCSファイルの処理中にエラーが発生しました: {str(e)}")
+        st.error(f"使用されたライブラリ: {processor.used_library}")
         return None, None, None
