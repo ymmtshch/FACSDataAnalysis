@@ -64,7 +64,13 @@ streamlit>=1.28.0
 pandas>=2.0.0
 numpy>=1.24.0
 plotly>=5.15.0
+bokeh>=3.2.0
+scipy>=1.10.0
+scikit-image>=0.21.0
+shapely>=2.0.0
 fcsparser>=0.2.0
+altair>=5.0.0
+flowio
 ```
 
 ### ユーティリティモジュール（必須）
