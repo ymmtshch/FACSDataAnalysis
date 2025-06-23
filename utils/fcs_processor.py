@@ -1,442 +1,385 @@
-"""
-FCS file processing utilities with multi-library support
-"""
 import pandas as pd
 import numpy as np
+import io
 import streamlit as st
 from typing import Tuple, Dict, Any, Optional
-import io
 
 class FCSProcessor:
-    """FCS file processor with automatic library selection"""
+    """FCSファイル処理クラス - FlowKit除去版"""
     
-    def __init__(self):
-        self.data = None
+    def __init__(self, file_data: bytes, filename: str):
+        self.file_data = file_data
+        self.filename = filename
+        self.fcs_data = None
         self.metadata = None
-        self.channels = None
         self.used_library = None
         
-    def _try_flowio(self, file_path_or_buffer):
-        """Try loading with flowio library"""
+    def load_fcs_file(self) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
+        """
+        FCSファイルを読み込む（FlowKit除去、flowio → fcsparser の順で試行）
+        
+        Returns:
+            Tuple[DataFrame, metadata, used_library]: データ、メタデータ、使用ライブラリ名
+        """
+        # FlowIOを最初に試行
         try:
             import flowio
+            fcs = flowio.FlowData(self.file_data)
             
-            # Reset buffer position if it's a buffer
-            if hasattr(file_path_or_buffer, 'seek'):
-                file_path_or_buffer.seek(0)
+            # イベントデータを取得
+            events = fcs.events
+            if hasattr(events, 'dtype') and events.dtype == 'O':
+                # array.arrayの場合はnumpy配列に変換
+                if hasattr(events[0], 'tolist'):
+                    events = np.array([evt.tolist() if hasattr(evt, 'tolist') else list(evt) for evt in events])
+                else:
+                    events = np.array([list(evt) for evt in events])
+            
+            # チャンネル名を取得
+            channel_names = []
+            for i in range(1, len(fcs.channels) + 1):
+                # $PnN (チャンネル名) → $PnS (ショート名) の順で取得
+                channel_key = f'$P{i}N'
+                short_key = f'$P{i}S'
                 
-            fcs = flowio.FlowData(file_path_or_buffer)
+                if channel_key in fcs.text:
+                    name = fcs.text[channel_key]
+                elif short_key in fcs.text:
+                    name = fcs.text[short_key]
+                else:
+                    name = f'Channel_{i}'
+                
+                channel_names.append(name)
             
-            # Convert to pandas DataFrame
-            data = pd.DataFrame(fcs.events, columns=fcs.channels['PnN'])
-            metadata = fcs.text
+            # 重複チャンネル名の処理
+            channel_names = self._handle_duplicate_channels(channel_names)
             
+            # DataFrameを作成
+            df = pd.DataFrame(events, columns=channel_names)
+            
+            # メタデータを辞書形式で取得
+            metadata = dict(fcs.text)
+            
+            self.fcs_data = df
+            self.metadata = metadata
             self.used_library = 'flowio'
-            return data, metadata
             
-        except ImportError:
-            return None, None
+            return df, metadata, 'flowio'
+            
         except Exception as e:
-            st.debug(f"flowio loading failed: {str(e)}")
-            return None, None
-    
-    def _try_flowkit(self, file_path_or_buffer):
-        """Try loading with flowkit library"""
-        try:
-            import flowkit
-            
-            # Reset buffer position if it's a buffer
-            if hasattr(file_path_or_buffer, 'seek'):
-                file_path_or_buffer.seek(0)
-                
-            sample = flowkit.Sample(file_path_or_buffer)
-            
-            # Get data and metadata
-            data = sample.as_dataframe()
-            metadata = sample.metadata
-            
-            self.used_library = 'flowkit'
-            return data, metadata
-            
-        except ImportError:
-            return None, None
-        except Exception as e:
-            st.debug(f"flowkit loading failed: {str(e)}")
-            return None, None
-    
-    def _try_fcsparser(self, file_path_or_buffer):
-        """Try loading with fcsparser library"""
+            st.warning(f"FlowIOでの読み込みに失敗: {str(e)}")
+        
+        # fcsparserをフォールバックとして試行
         try:
             import fcsparser
             
-            # Reset buffer position if it's a buffer
-            if hasattr(file_path_or_buffer, 'seek'):
-                file_path_or_buffer.seek(0)
-                
-            metadata, data = fcsparser.parse(file_path_or_buffer, 
-                                           meta_data_only=False, 
-                                           output_format='DataFrame')
+            # バイトデータをファイルライクオブジェクトに変換
+            file_like = io.BytesIO(self.file_data)
+            meta, data = fcsparser.parse(file_like, reformat_meta=True)
             
+            # チャンネル名の重複処理
+            if isinstance(data, pd.DataFrame):
+                data.columns = self._handle_duplicate_channels(list(data.columns))
+            
+            self.fcs_data = data
+            self.metadata = meta
             self.used_library = 'fcsparser'
-            return data, metadata
             
-        except ImportError:
-            return None, None
+            return data, meta, 'fcsparser'
+            
         except Exception as e:
-            st.debug(f"fcsparser loading failed: {str(e)}")
-            return None, None
+            st.error(f"fcsparserでの読み込みも失敗: {str(e)}")
+            if "newbyteorder" in str(e):
+                st.error("NumPy 2.0互換性エラーが発生しました。flowioの使用を推奨します。")
         
-    def load_fcs_file(self, file_path_or_buffer) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-        """
-        Load FCS file using automatic library selection
-        Priority: flowio → flowkit → fcsparser
+        return None, None, None
+    
+    def _handle_duplicate_channels(self, channel_names: list) -> list:
+        """重複するチャンネル名を処理"""
+        seen = {}
+        result = []
         
-        Args:
-            file_path_or_buffer: File path or buffer object
-            
-        Returns:
-            Tuple of (data_dataframe, metadata_dict)
-        """
-        # Try libraries in order of preference
-        loaders = [
-            ('flowio', self._try_flowio),
-            ('flowkit', self._try_flowkit),
-            ('fcsparser', self._try_fcsparser)
-        ]
+        for name in channel_names:
+            if name in seen:
+                seen[name] += 1
+                result.append(f"{name}_{seen[name]}")
+            else:
+                seen[name] = 1
+                result.append(name)
         
-        for lib_name, loader_func in loaders:
-            try:
-                data, metadata = loader_func(file_path_or_buffer)
-                if data is not None and metadata is not None:
-                    self.data = data
-                    self.metadata = metadata
-                    self.channels = list(data.columns)
-                    st.sidebar.success(f"使用ライブラリ: {lib_name}")
-                    return data, metadata
-            except Exception as e:
-                st.sidebar.warning(f"{lib_name} での読み込みに失敗: {str(e)}")
-                continue
-        
-        # All libraries failed
-        st.error("すべてのFCS読み込みライブラリで失敗しました。flowio、flowkit、fcsparserのいずれかをインストールしてください。")
-        return None, None
+        return result
     
     def get_file_info(self) -> Dict[str, Any]:
-        """
-        Get file information from metadata
-        
-        Returns:
-            Dictionary with file information
-        """
-        if not self.metadata:
+        """ファイル基本情報を取得"""
+        if self.metadata is None:
             return {}
         
         info = {}
         
-        # Handle different library metadata formats
-        if self.used_library == 'flowkit':
-            # flowkit uses lowercase keys
-            info['total_events'] = self.metadata.get('tot', self.metadata.get('$TOT', 'N/A'))
-            info['total_parameters'] = self.metadata.get('par', self.metadata.get('$PAR', 'N/A'))
-            info['acquisition_date'] = self.metadata.get('date', self.metadata.get('$DATE', 'N/A'))
-            info['acquisition_time'] = self.metadata.get('btim', self.metadata.get('$BTIM', 'N/A'))
-            info['cytometer'] = self.metadata.get('cyt', self.metadata.get('$CYT', 'N/A'))
-        else:
-            # Standard FCS metadata keys
-            info['total_events'] = self.metadata.get('$TOT', 'N/A')
-            info['total_parameters'] = self.metadata.get('$PAR', 'N/A')
-            info['acquisition_date'] = self.metadata.get('$DATE', 'N/A')
-            info['acquisition_time'] = self.metadata.get('$BTIM', 'N/A')
-            info['cytometer'] = self.metadata.get('$CYT', 'N/A')
+        # 総イベント数
+        tot_keys = ['$TOT', 'tot', 'TOTAL', 'total']
+        for key in tot_keys:
+            if key in self.metadata:
+                info['total_events'] = int(self.metadata[key])
+                break
         
-        info['experiment_name'] = self.metadata.get('$EXP', 'N/A')
-        info['sample_id'] = self.metadata.get('SAMPLE ID', 'N/A')
-        info['operator'] = self.metadata.get('$OP', 'N/A')
-        info['software'] = self.metadata.get('$SRC', 'N/A')
-        info['used_library'] = self.used_library
+        # パラメータ数
+        par_keys = ['$PAR', 'par', 'PARAMETERS', 'parameters']
+        for key in par_keys:
+            if key in self.metadata:
+                info['parameters'] = int(self.metadata[key])
+                break
+        
+        # 取得日時
+        date_keys = ['$DATE', 'date', 'DATE']
+        for key in date_keys:
+            if key in self.metadata:
+                info['date'] = self.metadata[key]
+                break
+        
+        # 取得開始時刻
+        btim_keys = ['$BTIM', 'btim', 'BTIM']
+        for key in btim_keys:
+            if key in self.metadata:
+                info['begin_time'] = self.metadata[key]
+                break
+        
+        # 取得終了時刻
+        etim_keys = ['$ETIM', 'etim', 'ETIM']
+        for key in etim_keys:
+            if key in self.metadata:
+                info['end_time'] = self.metadata[key]
+                break
+        
+        # 使用機器
+        cyt_keys = ['$CYT', 'cyt', 'CYTOMETER']
+        for key in cyt_keys:
+            if key in self.metadata:
+                info['cytometer'] = self.metadata[key]
+                break
+        
+        # 機器番号
+        cytnum_keys = ['$CYTNUM', 'cytnum', 'CYTNUM']
+        for key in cytnum_keys:
+            if key in self.metadata:
+                info['cytometer_number'] = self.metadata[key]
+                break
+        
+        # 実験名
+        exp_keys = ['EXPERIMENT NAME', '$EXP', 'exp', 'EXPERIMENT']
+        for key in exp_keys:
+            if key in self.metadata:
+                info['experiment_name'] = self.metadata[key]
+                break
+        
+        # サンプルID
+        sample_keys = ['SAMPLE ID', '$SMNO', 'smno', 'SAMPLE']
+        for key in sample_keys:
+            if key in self.metadata:
+                info['sample_id'] = self.metadata[key]
+                break
+        
+        # オペレーター
+        op_keys = ['$OP', 'op', 'OPERATOR']
+        for key in op_keys:
+            if key in self.metadata:
+                info['operator'] = self.metadata[key]
+                break
         
         return info
     
-    def get_channel_info(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Get detailed channel information from metadata
-        
-        Returns:
-            Dictionary with channel information
-        """
-        if not self.metadata:
+    def get_channel_info(self) -> Dict[str, Any]:
+        """チャンネル詳細情報を取得"""
+        if self.metadata is None:
             return {}
-            
+        
         channel_info = {}
         
-        # Extract channel information from metadata
-        for key, value in self.metadata.items():
-            if key.startswith('$P') and key.endswith('N'):
-                # Channel name
-                param_num = key[2:-1]  # Extract parameter number
-                channel_name = value
-                
-                # Handle duplicate channel names
-                original_name = channel_name
-                counter = 2
-                while channel_name in channel_info:
-                    channel_name = f"{original_name}_{counter}"
-                    counter += 1
-                
-                # Initialize channel info
-                channel_info[channel_name] = {
-                    'name': channel_name,
-                    'original_name': original_name,
-                    'parameter': param_num,
-                    'range': None,
-                    'gain': None,
-                    'voltage': None
-                }
-                
-                # Look for additional parameter information
-                range_key = f'$P{param_num}R'
-                gain_key = f'$P{param_num}G'
-                voltage_key = f'$P{param_num}V'
-                
-                if range_key in self.metadata:
-                    channel_info[channel_name]['range'] = self.metadata[range_key]
-                if gain_key in self.metadata:
-                    channel_info[channel_name]['gain'] = self.metadata[gain_key]
-                if voltage_key in self.metadata:
-                    channel_info[channel_name]['voltage'] = self.metadata[voltage_key]
+        # パラメータ数を取得
+        par_keys = ['$PAR', 'par', 'PARAMETERS']
+        num_params = None
+        for key in par_keys:
+            if key in self.metadata:
+                num_params = int(self.metadata[key])
+                break
+        
+        if num_params is None:
+            return {}
+        
+        for i in range(1, num_params + 1):
+            param_info = {}
+            
+            # チャンネル名
+            name_key = f'$P{i}N'
+            if name_key in self.metadata:
+                param_info['name'] = self.metadata[name_key]
+            
+            # ショート名
+            short_key = f'$P{i}S'
+            if short_key in self.metadata:
+                param_info['short_name'] = self.metadata[short_key]
+            
+            # レンジ
+            range_key = f'$P{i}R'
+            if range_key in self.metadata:
+                param_info['range'] = self.metadata[range_key]
+            
+            # ビット数
+            bits_key = f'$P{i}B'
+            if bits_key in self.metadata:
+                param_info['bits'] = self.metadata[bits_key]
+            
+            # ゲイン
+            gain_key = f'$P{i}G'
+            if gain_key in self.metadata:
+                param_info['gain'] = self.metadata[gain_key]
+            
+            # 電圧
+            voltage_key = f'$P{i}V'
+            if voltage_key in self.metadata:
+                param_info['voltage'] = self.metadata[voltage_key]
+            
+            channel_info[f'P{i}'] = param_info
         
         return channel_info
     
-    def get_basic_stats(self, channel: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Get basic statistics for data
-        
-        Args:
-            channel: Specific channel name, if None returns stats for all channels
-            
-        Returns:
-            Dictionary with statistical information
-        """
-        if self.data is None:
+    def get_basic_stats(self) -> Dict[str, Any]:
+        """基本統計情報を取得"""
+        if self.fcs_data is None:
             return {}
-            
-        if channel:
-            if channel in self.data.columns:
-                data_subset = self.data[channel]
-                return {
-                    'count': len(data_subset),
-                    'mean': float(data_subset.mean()),
-                    'median': float(data_subset.median()),
-                    'std': float(data_subset.std()),
-                    'min': float(data_subset.min()),
-                    'max': float(data_subset.max()),
-                    'q25': float(data_subset.quantile(0.25)),
-                    'q75': float(data_subset.quantile(0.75))
-                }
-            else:
-                return {}
-        else:
-            # Return stats for all channels
-            stats = {}
-            for col in self.data.columns:
-                try:
-                    stats[col] = {
-                        'count': len(self.data[col]),
-                        'mean': float(self.data[col].mean()),
-                        'median': float(self.data[col].median()),
-                        'std': float(self.data[col].std()),
-                        'min': float(self.data[col].min()),
-                        'max': float(self.data[col].max()),
-                        'q25': float(self.data[col].quantile(0.25)),
-                        'q75': float(self.data[col].quantile(0.75))
-                    }
-                except Exception as e:
-                    st.warning(f"統計計算エラー ({col}): {str(e)}")
-                    stats[col] = {'error': str(e)}
-            return stats
-    
-    def preprocess_data(self, data: pd.DataFrame, meta: Dict[str, Any]) -> pd.DataFrame:
-        """
-        Preprocess raw FCS data
         
-        Args:
-            data: Raw FCS data
-            meta: FCS metadata
-            
-        Returns:
-            Preprocessed DataFrame
-        """
-        processed_data = data.copy()
+        stats = {}
         
-        # Handle different data types from different libraries
-        if self.used_library == 'flowio':
-            # flowio might return array.array objects
-            for col in processed_data.columns:
-                if hasattr(processed_data[col].iloc[0], '__iter__') and not isinstance(processed_data[col].iloc[0], str):
-                    try:
-                        processed_data[col] = processed_data[col].apply(lambda x: np.array(x) if hasattr(x, '__iter__') else x)
-                    except:
-                        pass
+        # 数値列のみを対象とする
+        numeric_columns = self.fcs_data.select_dtypes(include=[np.number]).columns
         
-        # Ensure all columns are numeric
-        for col in processed_data.columns:
+        for col in numeric_columns:
             try:
-                processed_data[col] = pd.to_numeric(processed_data[col], errors='coerce')
-            except:
-                pass
+                col_data = self.fcs_data[col].dropna()
+                if len(col_data) > 0:
+                    stats[col] = {
+                        'mean': float(col_data.mean()),
+                        'median': float(col_data.median()),
+                        'std': float(col_data.std()),
+                        'min': float(col_data.min()),
+                        'max': float(col_data.max()),
+                        'count': int(len(col_data))
+                    }
+            except Exception as e:
+                # 統計計算に失敗した場合はスキップ
+                continue
         
-        # Remove any rows with all NaN values
-        processed_data = processed_data.dropna(how='all')
+        return stats
+    
+    def preprocess_data(self, data: pd.DataFrame, metadata: Dict) -> pd.DataFrame:
+        """データの前処理"""
+        if data is None:
+            return pd.DataFrame()
+        
+        # 数値データのみを保持
+        numeric_columns = data.select_dtypes(include=[np.number]).columns
+        processed_data = data[numeric_columns].copy()
+        
+        # NaN値を削除
+        processed_data = processed_data.dropna()
         
         return processed_data
     
     def apply_transform(self, data: pd.Series, transform_type: str) -> pd.Series:
-        """
-        Apply transformation to a single data series
-        
-        Args:
-            data: Input data series
-            transform_type: Type of transformation ('Log10', 'Asinh', 'Biexponential', 'none')
-            
-        Returns:
-            Transformed data series
-        """
-        if transform_type == 'none' or transform_type is None:
+        """データ変換を適用"""
+        if transform_type == "なし" or transform_type == "None":
             return data
-            
+        
         try:
-            if transform_type == 'Log10':
-                # Log10 transformation (avoid log of negative values)
-                positive_data = np.maximum(data, 1)
-                return np.log10(positive_data)
-                
-            elif transform_type == 'Asinh':
-                # Inverse hyperbolic sine transformation
-                return np.arcsinh(data / 150)
-                
-            elif transform_type == 'Biexponential':
-                # Biexponential transformation (simplified version)
-                result = data.copy()
-                pos_mask = data > 0
-                neg_mask = data <= 0
-                
-                result[pos_mask] = np.log10(data[pos_mask])
-                result[neg_mask] = -np.log10(-data[neg_mask] + 1)
-                
-                return result
+            if transform_type == "Log10":
+                # 負の値やゼロをわずかに正の値に置換
+                data_transformed = data.copy()
+                data_transformed[data_transformed <= 0] = 1e-6
+                return np.log10(data_transformed)
+            
+            elif transform_type == "Asinh":
+                return np.arcsinh(data / 1000)  # スケール調整
+            
+            elif transform_type == "Biexponential":
+                # 簡易的なbiexponential変換
+                return np.sign(data) * np.log10(1 + np.abs(data))
+            
             else:
-                st.warning(f"未知の変換タイプ: {transform_type}")
                 return data
                 
         except Exception as e:
-            st.error(f"データ変換エラー ({transform_type}): {str(e)}")
+            st.warning(f"データ変換に失敗しました ({transform_type}): {str(e)}")
             return data
     
-    def apply_transformation(self, data: pd.DataFrame, 
-                           transformation: str, 
-                           channels: list = None) -> pd.DataFrame:
-        """
-        Apply transformation to multiple channels (backward compatibility)
+    def export_data(self, data: pd.DataFrame, data_type: str = "data") -> str:
+        """データをCSV形式でエクスポート"""
+        if data.empty:
+            return ""
         
-        Args:
-            data: Input dataframe
-            transformation: Type of transformation ('log', 'asinh', 'biexp', 'Log10', 'Asinh', 'Biexponential')
-            channels: List of channels to transform, if None transform all
+        try:
+            # ファイル名から拡張子を除去
+            base_name = self.filename.rsplit('.', 1)[0] if '.' in self.filename else self.filename
             
-        Returns:
-            Transformed dataframe
-        """
-        # Convert old naming to new naming
-        transform_map = {
-            'log': 'Log10',
-            'asinh': 'Asinh', 
-            'biexp': 'Biexponential'
-        }
-        
-        if transformation in transform_map:
-            transformation = transform_map[transformation]
-        
-        if channels is None:
-            channels = data.columns.tolist()
+            if data_type == "stats":
+                filename = f"{base_name}_stats.csv"
+            else:
+                filename = f"{base_name}_data.csv"
             
-        data_transformed = data.copy()
-        
-        for channel in channels:
-            if channel in data.columns:
-                data_transformed[channel] = self.apply_transform(data[channel], transformation)
-        
-        return data_transformed
-    
-    def subsample_data(self, data: pd.DataFrame, 
-                      max_events: int = 10000) -> pd.DataFrame:
-        """
-        Subsample data for better performance
-        
-        Args:
-            data: Input dataframe
-            max_events: Maximum number of events
+            # CSVに変換
+            csv_data = data.to_csv(index=False, encoding='utf-8')
+            return csv_data
             
-        Returns:
-            Subsampled dataframe
-        """
-        if len(data) <= max_events:
-            return data
-            
-        # Random sampling
-        return data.sample(n=max_events, random_state=42).reset_index(drop=True)
-    
-    def export_data(self, data: pd.DataFrame, format: str = 'csv') -> str:
-        """
-        Export data to specified format
-        
-        Args:
-            data: DataFrame to export
-            format: Export format ('csv')
-            
-        Returns:
-            Exported data as string
-        """
-        if format == 'csv':
-            return data.to_csv(index=False)
-        else:
-            return data.to_csv(index=False)
+        except Exception as e:
+            st.error(f"データエクスポートエラー: {str(e)}")
+            return ""
 
 
-def load_and_process_fcs(uploaded_file, transformation='Asinh', max_events=10000):
+def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_events: int = 10000) -> Tuple[Optional['FCSProcessor'], Optional[pd.DataFrame], Optional[Dict]]:
     """
-    Load and process FCS file from uploaded file
+    FCSファイルを読み込んで処理する主要関数（FlowKit除去版）
     
     Args:
-        uploaded_file: Streamlit uploaded file object
-        transformation: Transformation to apply ('Log10', 'Asinh', 'Biexponential', 'none')
-        max_events: Maximum number of events to keep
-        
+        uploaded_file: Streamlitのアップロードファイル
+        transformation: データ変換タイプ
+        max_events: 最大イベント数
+    
     Returns:
-        Tuple of (processor_instance, processed_data, metadata)
+        Tuple[FCSProcessor, DataFrame, metadata]: プロセッサ、データ、メタデータ
     """
-    processor = FCSProcessor()
+    if uploaded_file is None:
+        return None, None, None
     
     try:
-        # Load FCS file with automatic library selection
-        data, metadata = processor.load_fcs_file(uploaded_file)
+        # ファイルデータを読み込み
+        file_data = uploaded_file.read()
+        filename = uploaded_file.name
+        
+        # FCSProcessorを初期化
+        processor = FCSProcessor(file_data, filename)
+        
+        # FCSファイルを読み込み
+        data, metadata, used_library = processor.load_fcs_file()
         
         if data is None:
+            st.error("FCSファイルの読み込みに失敗しました。")
             return None, None, None
         
-        # Preprocess data
-        data = processor.preprocess_data(data, metadata)
+        # データの前処理
+        processed_data = processor.preprocess_data(data, metadata)
         
-        # Apply transformation if requested
-        if transformation != 'none':
-            data = processor.apply_transformation(data, transformation)
+        # イベント数制限
+        if len(processed_data) > max_events:
+            processed_data = processed_data.sample(n=max_events, random_state=42)
         
-        # Subsample if necessary
-        if max_events and len(data) > max_events:
-            data = processor.subsample_data(data, max_events)
+        # データ変換（全列に適用）
+        if transformation != "なし":
+            for col in processed_data.columns:
+                processed_data[col] = processor.apply_transform(processed_data[col], transformation)
         
-        return processor, data, metadata
+        st.success(f"FCSファイルが正常に読み込まれました（使用ライブラリ: {used_library}）")
+        
+        return processor, processed_data, metadata
         
     except Exception as e:
-        st.error(f"FCSファイルの処理中にエラーが発生しました: {str(e)}")
-        st.error(f"使用されたライブラリ: {processor.used_library}")
+        st.error(f"ファイル処理エラー: {str(e)}")
         return None, None, None
