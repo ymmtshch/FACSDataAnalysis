@@ -1,38 +1,49 @@
 # utils/plotting.py - Plotting utilities for FACS Data Analysis
-# Updated for fcsparser migration from flowkit
+# Fixed version addressing README-code inconsistencies
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import bokeh.plotting as bp
-from bokeh.models import HoverTool, ColorBar, LinearColorMapper
-from bokeh.palettes import Viridis256
-from bokeh.transform import transform
-from bokeh.layouts import column, row
-import altair as alt
+import streamlit as st
 from scipy.stats import gaussian_kde
 from scipy.ndimage import gaussian_filter
-import streamlit as st
-from config import PLOT_CONFIG, DATA_CONFIG
 
-class FCSPlotter:
-    """Plotting utilities for FCS data using fcsparser"""
+# Default configuration if config.py is not available
+try:
+    from config import PLOT_CONFIG, DATA_CONFIG
+except ImportError:
+    PLOT_CONFIG = {
+        'figure_size': (800, 600),
+        'default_bins': 50,
+        'default_alpha': 0.6,
+        'scatter_size': 3,
+        'default_colormap': 'viridis'
+    }
+    DATA_CONFIG = {
+        'default_subsample_size': 10000
+    }
+
+class PlottingUtils:
+    """
+    Main plotting utilities class for FACS data analysis
+    Compatible with data from flowio, flowkit, and fcsparser
+    """
     
-    def __init__(self, data, metadata=None):
+    def __init__(self, data=None, metadata=None):
         """
         Initialize plotter with FCS data
         
         Parameters:
-        - data: pandas DataFrame from fcsparser
-        - metadata: dict with FCS metadata from fcsparser
+        - data: pandas DataFrame from any FCS reader (flowio, flowkit, fcsparser)
+        - metadata: dict with FCS metadata
         """
         self.data = data
         self.metadata = metadata or {}
         self.channels = list(data.columns) if data is not None else []
     
-    def subsample_data(self, n_events=None):
+    def _subsample_data(self, n_events=None):
         """Subsample data for better plotting performance"""
         if self.data is None or len(self.data) == 0:
             return self.data
@@ -44,183 +55,229 @@ class FCSPlotter:
             return self.data.sample(n=n_events, random_state=42)
         return self.data
     
+    def _apply_transform(self, data, transform='linear'):
+        """Apply data transformation"""
+        if transform == 'linear' or transform is None:
+            return data
+        elif transform == 'log' or transform == 'log10':
+            # Add small value to avoid log(0)
+            return np.log10(np.maximum(data, 1))
+        elif transform == 'asinh':
+            return np.arcsinh(data / 150)  # Standard cofactor for flow cytometry
+        elif transform == 'biexponential':
+            # Simplified biexponential (using asinh approximation)
+            return np.arcsinh(data / 150)
+        else:
+            st.warning(f"Unknown transformation: {transform}. Using linear.")
+            return data
+    
     def create_histogram(self, channel, bins=None, title=None, transform='linear'):
         """Create histogram for a channel"""
+        if self.data is None:
+            st.error("No data available for plotting")
+            return None
+            
         if channel not in self.channels:
-            st.error(f"Channel {channel} not found in data")
+            st.error(f"Channel {channel} not found in data. Available channels: {self.channels}")
             return None
         
-        data_subset = self.subsample_data()
+        data_subset = self._subsample_data()
         
         if bins is None:
             bins = PLOT_CONFIG['default_bins']
         
-        # Apply transformation
-        plot_data = self._apply_transform(data_subset[channel], transform)
-        
-        fig = px.histogram(
-            x=plot_data,
-            nbins=bins,
-            title=title or f"Histogram: {channel}",
-            labels={'x': channel, 'y': 'Count'}
-        )
-        
-        fig.update_layout(
-            width=PLOT_CONFIG['figure_size'][0],
-            height=PLOT_CONFIG['figure_size'][1],
-            showlegend=False
-        )
-        
-        return fig
+        try:
+            # Apply transformation
+            plot_data = self._apply_transform(data_subset[channel], transform)
+            
+            fig = px.histogram(
+                x=plot_data,
+                nbins=bins,
+                title=title or f"Histogram: {channel}",
+                labels={'x': channel, 'y': 'Count'}
+            )
+            
+            fig.update_layout(
+                width=PLOT_CONFIG['figure_size'][0],
+                height=PLOT_CONFIG['figure_size'][1],
+                showlegend=False
+            )
+            
+            return fig
+            
+        except Exception as e:
+            st.error(f"Error creating histogram: {str(e)}")
+            return None
     
     def create_scatter_plot(self, x_channel, y_channel, title=None, 
-                          color_channel=None, transform='linear'):
-        """Create scatter plot for two channels"""
+                          alpha=None, n_points=None, x_transform='linear', y_transform='linear'):
+        """
+        Create scatter plot for two channels
+        
+        Parameters:
+        - x_channel: X-axis channel name
+        - y_channel: Y-axis channel name  
+        - title: Plot title
+        - alpha: Point transparency (0.0-1.0)
+        - n_points: Number of points to display
+        - x_transform: Transformation for X-axis data
+        - y_transform: Transformation for Y-axis data
+        """
+        if self.data is None:
+            st.error("No data available for plotting")
+            return None
+            
         if x_channel not in self.channels or y_channel not in self.channels:
-            st.error(f"One or both channels not found in data")
+            st.error(f"One or both channels not found. Available: {self.channels}")
             return None
         
-        data_subset = self.subsample_data()
-        
-        # Apply transformations
-        x_data = self._apply_transform(data_subset[x_channel], transform)
-        y_data = self._apply_transform(data_subset[y_channel], transform)
-        
-        if color_channel and color_channel in self.channels:
-            color_data = self._apply_transform(data_subset[color_channel], transform)
-            fig = px.scatter(
-                x=x_data, y=y_data, color=color_data,
-                title=title or f"{x_channel} vs {y_channel}",
-                labels={'x': x_channel, 'y': y_channel, 'color': color_channel},
-                opacity=PLOT_CONFIG['default_alpha']
-            )
+        # Use provided parameters or defaults
+        if alpha is None:
+            alpha = PLOT_CONFIG['default_alpha']
+        if n_points is not None:
+            data_subset = self.data.sample(n=min(n_points, len(self.data)), random_state=42)
         else:
+            data_subset = self._subsample_data()
+        
+        try:
+            # Apply transformations
+            x_data = self._apply_transform(data_subset[x_channel], x_transform)
+            y_data = self._apply_transform(data_subset[y_channel], y_transform)
+            
             fig = px.scatter(
                 x=x_data, y=y_data,
                 title=title or f"{x_channel} vs {y_channel}",
                 labels={'x': x_channel, 'y': y_channel},
-                opacity=PLOT_CONFIG['default_alpha']
+                opacity=alpha
             )
-        
-        fig.update_traces(marker=dict(size=PLOT_CONFIG['scatter_size']))
-        fig.update_layout(
-            width=PLOT_CONFIG['figure_size'][0],
-            height=PLOT_CONFIG['figure_size'][1]
-        )
-        
-        return fig
+            
+            fig.update_traces(marker=dict(size=PLOT_CONFIG['scatter_size']))
+            fig.update_layout(
+                width=PLOT_CONFIG['figure_size'][0],
+                height=PLOT_CONFIG['figure_size'][1]
+            )
+            
+            return fig
+            
+        except Exception as e:
+            st.error(f"Error creating scatter plot: {str(e)}")
+            return None
     
     def create_density_plot(self, x_channel, y_channel, bins=50, title=None, 
-                           transform='linear'):
-        """Create 2D density plot (contour plot)"""
+                           x_transform='linear', y_transform='linear'):
+        """
+        Create 2D density plot (contour plot)
+        
+        Parameters:
+        - x_channel: X-axis channel name
+        - y_channel: Y-axis channel name
+        - bins: Number of bins for density calculation
+        - title: Plot title
+        - x_transform: Transformation for X-axis data
+        - y_transform: Transformation for Y-axis data
+        """
+        if self.data is None:
+            st.error("No data available for plotting")
+            return None
+            
         if x_channel not in self.channels or y_channel not in self.channels:
             st.error("One or both channels not found in data")
             return None
         
-        data_subset = self.subsample_data()
+        data_subset = self._subsample_data()
         
-        # Apply transformations
-        x_data = self._apply_transform(data_subset[x_channel], transform)
-        y_data = self._apply_transform(data_subset[y_channel], transform)
-        
-        # Create 2D histogram
-        hist, x_edges, y_edges = np.histogram2d(x_data, y_data, bins=bins)
-        
-        # Smooth the density
-        hist_smooth = gaussian_filter(hist, sigma=1)
-        
-        # Create contour plot
-        fig = go.Figure(data=go.Contour(
-            z=hist_smooth.T,
-            x=x_edges[:-1],
-            y=y_edges[:-1],
-            colorscale=PLOT_CONFIG['default_colormap'],
-            contours=dict(
-                showlabels=True,
-                labelfont=dict(size=12, color='white')
+        try:
+            # Apply transformations
+            x_data = self._apply_transform(data_subset[x_channel], x_transform)
+            y_data = self._apply_transform(data_subset[y_channel], y_transform)
+            
+            # Create 2D histogram
+            hist, x_edges, y_edges = np.histogram2d(x_data, y_data, bins=bins)
+            
+            # Smooth the density
+            hist_smooth = gaussian_filter(hist, sigma=1)
+            
+            # Create contour plot
+            fig = go.Figure(data=go.Contour(
+                z=hist_smooth.T,
+                x=x_edges[:-1],
+                y=y_edges[:-1],
+                colorscale=PLOT_CONFIG['default_colormap'],
+                contours=dict(
+                    showlabels=True,
+                    labelfont=dict(size=12, color='white')
+                )
+            ))
+            
+            fig.update_layout(
+                title=title or f"Density Plot: {x_channel} vs {y_channel}",
+                xaxis_title=x_channel,
+                yaxis_title=y_channel,
+                width=PLOT_CONFIG['figure_size'][0],
+                height=PLOT_CONFIG['figure_size'][1]
             )
-        ))
-        
-        fig.update_layout(
-            title=title or f"Density Plot: {x_channel} vs {y_channel}",
-            xaxis_title=x_channel,
-            yaxis_title=y_channel,
-            width=PLOT_CONFIG['figure_size'][0],
-            height=PLOT_CONFIG['figure_size'][1]
-        )
-        
-        return fig
-    
-    def create_hexbin_plot(self, x_channel, y_channel, gridsize=50, title=None, 
-                          transform='linear'):
-        """Create hexagonal binning plot using Altair"""
-        if x_channel not in self.channels or y_channel not in self.channels:
-            st.error("One or both channels not found in data")
+            
+            return fig
+            
+        except Exception as e:
+            st.error(f"Error creating density plot: {str(e)}")
             return None
-        
-        data_subset = self.subsample_data()
-        
-        # Apply transformations
-        plot_data = data_subset.copy()
-        plot_data[x_channel] = self._apply_transform(data_subset[x_channel], transform)
-        plot_data[y_channel] = self._apply_transform(data_subset[y_channel], transform)
-        
-        chart = alt.Chart(plot_data).mark_circle(size=20, opacity=0.6).encode(
-            x=alt.X(f'{x_channel}:Q', title=x_channel),
-            y=alt.Y(f'{y_channel}:Q', title=y_channel),
-            color=alt.Color('count():Q', scale=alt.Scale(scheme='viridis'))
-        ).resolve_scale(
-            color='independent'
-        ).properties(
-            width=PLOT_CONFIG['figure_size'][0]-100,
-            height=PLOT_CONFIG['figure_size'][1]-100,
-            title=title or f"Hexbin Plot: {x_channel} vs {y_channel}"
-        )
-        
-        return chart
     
     def create_multi_histogram(self, channels, bins=None, transform='linear'):
         """Create multiple histograms in subplots"""
+        if self.data is None:
+            st.error("No data available for plotting")
+            return None
+            
         if not channels or not all(ch in self.channels for ch in channels):
             st.error("Some channels not found in data")
             return None
         
-        data_subset = self.subsample_data()
+        data_subset = self._subsample_data()
         
         if bins is None:
             bins = PLOT_CONFIG['default_bins']
         
-        n_channels = len(channels)
-        cols = min(3, n_channels)
-        rows = (n_channels - 1) // cols + 1
-        
-        fig = make_subplots(
-            rows=rows, cols=cols,
-            subplot_titles=channels,
-            vertical_spacing=0.1,
-            horizontal_spacing=0.1
-        )
-        
-        for i, channel in enumerate(channels):
-            row = i // cols + 1
-            col = i % cols + 1
+        try:
+            n_channels = len(channels)
+            cols = min(3, n_channels)
+            rows = (n_channels - 1) // cols + 1
             
-            plot_data = self._apply_transform(data_subset[channel], transform)
-            
-            fig.add_trace(
-                go.Histogram(x=plot_data, nbinsx=bins, name=channel, showlegend=False),
-                row=row, col=col
+            fig = make_subplots(
+                rows=rows, cols=cols,
+                subplot_titles=channels,
+                vertical_spacing=0.1,
+                horizontal_spacing=0.1
             )
-        
-        fig.update_layout(
-            height=300 * rows,
-            title_text="Multiple Channel Histograms"
-        )
-        
-        return fig
+            
+            for i, channel in enumerate(channels):
+                row = i // cols + 1
+                col = i % cols + 1
+                
+                plot_data = self._apply_transform(data_subset[channel], transform)
+                
+                fig.add_trace(
+                    go.Histogram(x=plot_data, nbinsx=bins, name=channel, showlegend=False),
+                    row=row, col=col
+                )
+            
+            fig.update_layout(
+                height=300 * rows,
+                title_text="Multiple Channel Histograms"
+            )
+            
+            return fig
+            
+        except Exception as e:
+            st.error(f"Error creating multi-histogram: {str(e)}")
+            return None
     
     def create_correlation_heatmap(self, channels=None, method='pearson'):
         """Create correlation heatmap"""
+        if self.data is None:
+            st.error("No data available for plotting")
+            return None
+            
         if channels is None:
             # Use numeric channels only
             numeric_channels = self.data.select_dtypes(include=[np.number]).columns
@@ -230,62 +287,64 @@ class FCSPlotter:
             st.error("Some channels not found in data")
             return None
         
-        data_subset = self.subsample_data()
-        corr_data = data_subset[channels].corr(method=method)
-        
-        fig = px.imshow(
-            corr_data,
-            text_auto=True,
-            aspect="auto",
-            color_continuous_scale='RdBu_r',
-            title=f"Channel Correlation Heatmap ({method.title()})"
-        )
-        
-        fig.update_layout(
-            width=PLOT_CONFIG['figure_size'][0],
-            height=PLOT_CONFIG['figure_size'][1]
-        )
-        
-        return fig
-    
-    def _apply_transform(self, data, transform='linear'):
-        """Apply data transformation"""
-        if transform == 'linear':
-            return data
-        elif transform == 'log':
-            # Add small value to avoid log(0)
-            return np.log10(data + 1)
-        elif transform == 'asinh':
-            return np.arcsinh(data / 150)  # Standard cofactor for flow cytometry
-        elif transform == 'biexponential':
-            # Simplified biexponential (just asinh for now)
-            return np.arcsinh(data / 150)
-        else:
-            return data
+        try:
+            data_subset = self._subsample_data()
+            corr_data = data_subset[channels].corr(method=method)
+            
+            fig = px.imshow(
+                corr_data,
+                text_auto=True,
+                aspect="auto",
+                color_continuous_scale='RdBu_r',
+                title=f"Channel Correlation Heatmap ({method.title()})"
+            )
+            
+            fig.update_layout(
+                width=PLOT_CONFIG['figure_size'][0],
+                height=PLOT_CONFIG['figure_size'][1]
+            )
+            
+            return fig
+            
+        except Exception as e:
+            st.error(f"Error creating correlation heatmap: {str(e)}")
+            return None
     
     def get_channel_statistics(self, channel, gate_data=None):
         """Get basic statistics for a channel"""
+        if self.data is None:
+            return None
+            
         if channel not in self.channels:
             return None
         
-        data_to_analyze = gate_data if gate_data is not None else self.data
-        channel_data = data_to_analyze[channel]
-        
-        stats = {
-            'count': len(channel_data),
-            'mean': np.mean(channel_data),
-            'median': np.median(channel_data),
-            'std': np.std(channel_data),
-            'min': np.min(channel_data),
-            'max': np.max(channel_data),
-            'q25': np.percentile(channel_data, 25),
-            'q75': np.percentile(channel_data, 75)
-        }
-        
-        return stats
+        try:
+            data_to_analyze = gate_data if gate_data is not None else self.data
+            channel_data = data_to_analyze[channel]
+            
+            stats = {
+                'channel': channel,
+                'count': len(channel_data),
+                'mean': float(np.mean(channel_data)),
+                'median': float(np.median(channel_data)),
+                'std': float(np.std(channel_data)),
+                'min': float(np.min(channel_data)),
+                'max': float(np.max(channel_data)),
+                'q25': float(np.percentile(channel_data, 25)),
+                'q75': float(np.percentile(channel_data, 75))
+            }
+            
+            return stats
+            
+        except Exception as e:
+            st.error(f"Error calculating statistics for {channel}: {str(e)}")
+            return None
     
     def create_statistics_table(self, channels=None, gate_data=None):
         """Create a statistics table for channels"""
+        if self.data is None:
+            return None
+            
         if channels is None:
             channels = self.channels[:10]  # Limit to first 10 channels
         
@@ -294,55 +353,16 @@ class FCSPlotter:
             if channel in self.channels:
                 stats = self.get_channel_statistics(channel, gate_data)
                 if stats:
-                    stats['channel'] = channel
                     stats_data.append(stats)
         
         if stats_data:
             return pd.DataFrame(stats_data)
         return None
 
-def create_interactive_scatter(data, x_channel, y_channel, width=800, height=600):
-    """Create interactive scatter plot using Bokeh"""
-    from bokeh.plotting import figure
-    from bokeh.models import HoverTool
-    
-    # Subsample data if too large
-    if len(data) > DATA_CONFIG['default_subsample_size']:
-        plot_data = data.sample(n=DATA_CONFIG['default_subsample_size'], random_state=42)
-    else:
-        plot_data = data
-    
-    p = figure(
-        width=width, 
-        height=height,
-        title=f"{x_channel} vs {y_channel}",
-        x_axis_label=x_channel,
-        y_axis_label=y_channel,
-        tools="pan,wheel_zoom,box_zoom,reset,save"
-    )
-    
-    # Add hover tool
-    hover = HoverTool(tooltips=[
-        (x_channel, f"@{{{x_channel}}}"),
-        (y_channel, f"@{{{y_channel}}}")
-    ])
-    p.add_tools(hover)
-    
-    # Create scatter plot
-    p.circle(
-        x=x_channel, 
-        y=y_channel, 
-        source=plot_data,
-        size=PLOT_CONFIG['scatter_size'],
-        alpha=PLOT_CONFIG['default_alpha']
-    )
-    
-    return p
-
-# モジュールレベルの便利関数（既存のFCSPlotterクラスを使用）
+# Backward compatibility: module-level functions that use PlottingUtils
 def create_histogram(data, channel, bins=None, title=None, transform='linear', metadata=None):
     """
-    Create histogram for a channel (module-level function)
+    Create histogram for a channel (module-level function for backward compatibility)
     
     Parameters:
     - data: pandas DataFrame
@@ -350,32 +370,33 @@ def create_histogram(data, channel, bins=None, title=None, transform='linear', m
     - bins: number of bins
     - title: plot title
     - transform: data transformation
-    - metadata: FCS metadata
+    - metadata: FCS metadata (optional)
     """
-    plotter = FCSPlotter(data, metadata)
+    plotter = PlottingUtils(data, metadata)
     return plotter.create_histogram(channel, bins, title, transform)
 
-def create_scatter_plot(data, x_channel, y_channel, title=None, color_channel=None, 
+def create_scatter_plot(data, x_channel, y_channel, title=None, alpha=None, 
                        transform='linear', metadata=None):
     """
-    Create scatter plot for two channels (module-level function)
+    Create scatter plot for two channels (module-level function for backward compatibility)
     
     Parameters:
     - data: pandas DataFrame
     - x_channel: x-axis channel name
     - y_channel: y-axis channel name
     - title: plot title
-    - color_channel: optional color channel
-    - transform: data transformation
-    - metadata: FCS metadata
+    - alpha: point transparency
+    - transform: data transformation (applied to both axes)
+    - metadata: FCS metadata (optional)
     """
-    plotter = FCSPlotter(data, metadata)
-    return plotter.create_scatter_plot(x_channel, y_channel, title, color_channel, transform)
+    plotter = PlottingUtils(data, metadata)
+    return plotter.create_scatter_plot(x_channel, y_channel, title, alpha, 
+                                      None, transform, transform)
 
 def create_density_plot(data, x_channel, y_channel, bins=50, title=None, 
                        transform='linear', metadata=None):
     """
-    Create 2D density plot (module-level function)
+    Create 2D density plot (module-level function for backward compatibility)
     
     Parameters:
     - data: pandas DataFrame
@@ -383,92 +404,73 @@ def create_density_plot(data, x_channel, y_channel, bins=50, title=None,
     - y_channel: y-axis channel name
     - bins: number of bins
     - title: plot title
-    - transform: data transformation
-    - metadata: FCS metadata
+    - transform: data transformation (applied to both axes)
+    - metadata: FCS metadata (optional)
     """
-    plotter = FCSPlotter(data, metadata)
-    return plotter.create_density_plot(x_channel, y_channel, bins, title, transform)
+    plotter = PlottingUtils(data, metadata)
+    return plotter.create_density_plot(x_channel, y_channel, bins, title, 
+                                      transform, transform)
 
 def create_multi_histogram(data, channels, bins=None, transform='linear', metadata=None):
     """
-    Create multiple histograms (module-level function)
+    Create multiple histograms (module-level function for backward compatibility)
     
     Parameters:
     - data: pandas DataFrame
     - channels: list of channel names
     - bins: number of bins
     - transform: data transformation
-    - metadata: FCS metadata
+    - metadata: FCS metadata (optional)
     """
-    plotter = FCSPlotter(data, metadata)
+    plotter = PlottingUtils(data, metadata)
     return plotter.create_multi_histogram(channels, bins, transform)
 
 def create_correlation_heatmap(data, channels=None, method='pearson', metadata=None):
     """
-    Create correlation heatmap (module-level function)
+    Create correlation heatmap (module-level function for backward compatibility)
     
     Parameters:
     - data: pandas DataFrame
     - channels: list of channel names
     - method: correlation method
-    - metadata: FCS metadata
+    - metadata: FCS metadata (optional)
     """
-    plotter = FCSPlotter(data, metadata)
+    plotter = PlottingUtils(data, metadata)
     return plotter.create_correlation_heatmap(channels, method)
 
-def create_hexbin_plot(data, x_channel, y_channel, gridsize=50, title=None, 
-                      transform='linear', metadata=None):
-    """
-    Create hexagonal binning plot (module-level function)
+# Additional utility functions
+def create_interactive_scatter(data, x_channel, y_channel, width=800, height=600):
+    """Create interactive scatter plot using Plotly (simplified version)"""
+    if data is None or len(data) == 0:
+        st.error("No data available for plotting")
+        return None
     
-    Parameters:
-    - data: pandas DataFrame
-    - x_channel: x-axis channel name
-    - y_channel: y-axis channel name
-    - gridsize: grid size
-    - title: plot title
-    - transform: data transformation
-    - metadata: FCS metadata
-    """
-    plotter = FCSPlotter(data, metadata)
-    return plotter.create_hexbin_plot(x_channel, y_channel, gridsize, title, transform)
+    # Subsample data if too large
+    if len(data) > DATA_CONFIG['default_subsample_size']:
+        plot_data = data.sample(n=DATA_CONFIG['default_subsample_size'], random_state=42)
+    else:
+        plot_data = data
+    
+    try:
+        fig = px.scatter(
+            plot_data, 
+            x=x_channel, 
+            y=y_channel,
+            title=f"{x_channel} vs {y_channel}",
+            width=width,
+            height=height,
+            opacity=PLOT_CONFIG['default_alpha']
+        )
+        
+        fig.update_traces(marker=dict(size=PLOT_CONFIG['scatter_size']))
+        
+        return fig
+        
+    except Exception as e:
+        st.error(f"Error creating interactive scatter plot: {str(e)}")
+        return None
 
-class PlottingUtils:
-    """Backward compatibility class - wrapper around FCSPlotter"""
-    
-    def __init__(self, data=None, metadata=None):
-        self.plotter = FCSPlotter(data, metadata)
-        self.data = data
-        self.metadata = metadata
-    
-    def create_histogram(self, channel, bins=None, title=None, transform='linear'):
-        """Create histogram using FCSPlotter"""
-        return self.plotter.create_histogram(channel, bins, title, transform)
-    
-    def create_scatter_plot(self, x_channel, y_channel, title=None, 
-                          color_channel=None, transform='linear'):
-        """Create scatter plot using FCSPlotter"""
-        return self.plotter.create_scatter_plot(x_channel, y_channel, title, 
-                                              color_channel, transform)
-    
-    def create_density_plot(self, x_channel, y_channel, bins=50, title=None, 
-                           transform='linear'):
-        """Create density plot using FCSPlotter"""
-        return self.plotter.create_density_plot(x_channel, y_channel, bins, 
-                                               title, transform)
-    
-    def create_multi_histogram(self, channels, bins=None, transform='linear'):
-        """Create multiple histograms using FCSPlotter"""
-        return self.plotter.create_multi_histogram(channels, bins, transform)
-    
-    def create_correlation_heatmap(self, channels=None, method='pearson'):
-        """Create correlation heatmap using FCSPlotter"""
-        return self.plotter.create_correlation_heatmap(channels, method)
-    
-    def get_channel_statistics(self, channel, gate_data=None):
-        """Get channel statistics using FCSPlotter"""
-        return self.plotter.get_channel_statistics(channel, gate_data)
-    
-    def create_statistics_table(self, channels=None, gate_data=None):
-        """Create statistics table using FCSPlotter"""
-        return self.plotter.create_statistics_table(channels, gate_data)
+# Legacy class alias for backward compatibility
+class FCSPlotter(PlottingUtils):
+    """Legacy alias for PlottingUtils - for backward compatibility"""
+    pass
