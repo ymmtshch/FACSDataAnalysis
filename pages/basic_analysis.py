@@ -4,21 +4,17 @@ import numpy as np
 import tempfile
 import os
 
-# FlowIOまたはFlowKitが利用可能かチェック
+# FlowIOまたはfcsparserが利用可能かチェック（FlowKitは除外）
 try:
     import flowio
     FCS_LIBRARY = "flowio"
 except ImportError:
     try:
-        import flowkit as fk
-        FCS_LIBRARY = "flowkit"
+        import fcsparser
+        FCS_LIBRARY = "fcsparser"
     except ImportError:
-        try:
-            import fcsparser
-            FCS_LIBRARY = "fcsparser"
-        except ImportError:
-            st.error("FCS読み込みライブラリが見つかりません。flowio, flowkit, または fcsparser をインストールしてください。")
-            st.stop()
+        st.error("FCS読み込みライブラリが見つかりません。flowio または fcsparser をインストールしてください。")
+        st.stop()
 
 from utils.fcs_processor import FCSProcessor
 from utils.plotting import PlottingUtils
@@ -27,7 +23,7 @@ import plotly.graph_objects as go
 from config import Config
 
 def read_fcs_file(file_path):
-    """FCSファイルを読み込む関数（利用可能なライブラリに応じて選択）"""
+    """FCSファイルを読み込む関数（flowioまたはfcsparserを使用）"""
     try:
         if FCS_LIBRARY == "flowio":
             # FlowIOを使用
@@ -123,19 +119,7 @@ def read_fcs_file(file_path):
             data = pd.DataFrame(events_array, columns=unique_channel_names)
             
             return meta, data
-            
-        elif FCS_LIBRARY == "flowkit":
-            # FlowKitを使用
-            sample = fk.Sample(file_path)
-            
-            # メタデータの取得
-            meta = sample.metadata
-            
-            # データの取得（NumPy配列として）
-            events = sample.as_dataframe()
-            
-            return meta, events
-            
+                    
         elif FCS_LIBRARY == "fcsparser":
             # fcsparserを使用（NumPy 2.0互換性の問題がある可能性）
             try:
@@ -231,13 +215,6 @@ def main():
             for key in important_keys:
                 if key in meta:
                     meta_display[key] = meta[key]
-            
-            # FlowKitの場合は異なるキー名を試す
-            if not meta_display and FCS_LIBRARY == "flowkit":
-                flowkit_keys = ['tot', 'par', 'date', 'btim', 'etim', 'cyt', 'cytnum']
-                for key in flowkit_keys:
-                    if key in meta:
-                        meta_display[f'${key.upper()}'] = meta[key]
             
             if meta_display:
                 st.json(meta_display)
