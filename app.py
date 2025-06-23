@@ -1,6 +1,7 @@
 """
 FACS Data Analysis - Main Application
 Streamlit-based web application for flow cytometry data analysis
+Modified to exclude FlowKit dependency
 """
 
 import streamlit as st
@@ -8,10 +9,27 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from utils.fcs_processor import FCSProcessor, load_and_process_fcs
-from utils.plotting import create_histogram, create_scatter_plot
-#from utils.gating import GatingTool
-import config
+import io
+import warnings
+warnings.filterwarnings('ignore')
+
+# FCS file reading libraries (in order of preference)
+try:
+    import flowio
+    FLOWIO_AVAILABLE = True
+except ImportError:
+    FLOWIO_AVAILABLE = False
+
+try:
+    import fcsparser
+    FCSPARSER_AVAILABLE = True
+except ImportError:
+    FCSPARSER_AVAILABLE = False
+
+# Check if any FCS library is available
+if not FLOWIO_AVAILABLE and not FCSPARSER_AVAILABLE:
+    st.error("❌ FCSファイル読み込みライブラリが見つかりません。flowioまたはfcsparserをインストールしてください。")
+    st.stop()
 
 # Page configuration
 st.set_page_config(
@@ -48,6 +66,191 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+class SimpleFCSProcessor:
+    """Simplified FCS processor without FlowKit dependency"""
+    
+    def __init__(self):
+        self.data = None
+        self.metadata = None
+        self.channels = None
+        self.library_used = None
+    
+    def load_fcs_file(self, file, max_events=10000):
+        """Load FCS file using available libraries"""
+        try:
+            # Try flowio first (recommended)
+            if FLOWIO_AVAILABLE:
+                return self._load_with_flowio(file, max_events)
+            elif FCSPARSER_AVAILABLE:
+                return self._load_with_fcsparser(file, max_events)
+            else:
+                raise ImportError("No FCS reading library available")
+        except Exception as e:
+            st.error(f"❌ FCSファイルの読み込みに失敗しました: {str(e)}")
+            return None, None, None
+    
+    def _load_with_flowio(self, file, max_events):
+        """Load FCS file using flowio"""
+        try:
+            fcs = flowio.FlowData(file.getvalue())
+            self.library_used = "flowio"
+            
+            # Get event data
+            events = fcs.events
+            if isinstance(events, np.ndarray):
+                data_array = events
+            else:
+                # Handle array.array case
+                data_array = np.array(events)
+            
+            # Reshape if needed
+            if len(data_array.shape) == 1:
+                n_params = int(fcs.text.get('$PAR', 0))
+                if n_params > 0:
+                    data_array = data_array.reshape(-1, n_params)
+            
+            # Limit events
+            if len(data_array) > max_events:
+                indices = np.random.choice(len(data_array), max_events, replace=False)
+                data_array = data_array[indices]
+            
+            # Get channel names
+            channels = []
+            n_params = int(fcs.text.get('$PAR', 0))
+            for i in range(1, n_params + 1):
+                channel_name = fcs.text.get(f'$P{i}N', f'Channel_{i}')
+                if not channel_name or channel_name == '':
+                    channel_name = fcs.text.get(f'$P{i}S', f'Channel_{i}')
+                channels.append(channel_name)
+            
+            # Create DataFrame
+            df = pd.DataFrame(data_array, columns=channels)
+            
+            # Store metadata
+            self.metadata = dict(fcs.text)
+            self.channels = channels
+            self.data = df
+            
+            return df, self.metadata, channels
+            
+        except Exception as e:
+            st.error(f"FlowIO読み込みエラー: {str(e)}")
+            return None, None, None
+    
+    def _load_with_fcsparser(self, file, max_events):
+        """Load FCS file using fcsparser"""
+        try:
+            # Reset file pointer
+            file.seek(0)
+            
+            # Read with fcsparser
+            metadata, data = fcsparser.parse(file, meta_data_only=False, reformat_meta=True)
+            self.library_used = "fcsparser"
+            
+            # Limit events
+            if len(data) > max_events:
+                data = data.sample(n=max_events, random_state=42)
+            
+            # Get channel names
+            channels = list(data.columns)
+            
+            # Store data
+            self.metadata = metadata
+            self.channels = channels
+            self.data = data
+            
+            return data, metadata, channels
+            
+        except Exception as e:
+            st.error(f"FCSParser読み込みエラー: {str(e)}")
+            return None, None, None
+    
+    def apply_transformation(self, data, transformation="none"):
+        """Apply data transformation"""
+        if transformation == "none":
+            return data
+        
+        transformed_data = data.copy()
+        
+        for column in data.select_dtypes(include=[np.number]).columns:
+            if transformation == "log":
+                # Log10 transformation (add small value to avoid log(0))
+                transformed_data[column] = np.log10(data[column] + 1)
+            elif transformation == "asinh":
+                # Asinh transformation
+                transformed_data[column] = np.arcsinh(data[column] / 150)
+            elif transformation == "biexp":
+                # Simple biexponential approximation
+                transformed_data[column] = np.sign(data[column]) * np.log10(np.abs(data[column]) + 1)
+        
+        return transformed_data
+    
+    def get_file_info(self):
+        """Get basic file information"""
+        if self.metadata is None:
+            return {}
+        
+        info = {}
+        
+        # Basic information
+        info['total_events'] = self.metadata.get('$TOT', 'N/A')
+        info['total_parameters'] = self.metadata.get('$PAR', 'N/A')
+        info['acquisition_date'] = self.metadata.get('$DATE', 'N/A')
+        info['acquisition_time'] = self.metadata.get('$BTIM', 'N/A')
+        info['cytometer'] = self.metadata.get('$CYT', 'N/A')
+        
+        # Experiment information
+        info['experiment_name'] = self.metadata.get('$EXP', 'N/A')
+        info['sample_id'] = self.metadata.get('$SMNO', 'N/A')
+        info['operator'] = self.metadata.get('$OP', 'N/A')
+        info['software'] = self.metadata.get('$SRC', 'N/A')
+        
+        return info
+    
+    def get_channel_info(self):
+        """Get channel information"""
+        if self.metadata is None or self.channels is None:
+            return {}
+        
+        channel_info = {}
+        n_params = int(self.metadata.get('$PAR', 0))
+        
+        for i in range(1, n_params + 1):
+            channel_name = self.channels[i-1] if i-1 < len(self.channels) else f'Channel_{i}'
+            
+            channel_info[channel_name] = {
+                'Range': self.metadata.get(f'$P{i}R', 'N/A'),
+                'Bits': self.metadata.get(f'$P{i}B', 'N/A'),
+                'Gain': self.metadata.get(f'$P{i}G', 'N/A'),
+                'Voltage': self.metadata.get(f'$P{i}V', 'N/A')
+            }
+        
+        return channel_info
+    
+    def get_basic_stats(self):
+        """Get basic statistics for all channels"""
+        if self.data is None:
+            return {}
+        
+        stats = {}
+        numeric_columns = self.data.select_dtypes(include=[np.number]).columns
+        
+        for column in numeric_columns:
+            stats[column] = {
+                'Mean': self.data[column].mean(),
+                'Median': self.data[column].median(),
+                'Std': self.data[column].std(),
+                'Min': self.data[column].min(),
+                'Max': self.data[column].max(),
+                'Count': self.data[column].count()
+            }
+        
+        return stats
+    
+    def export_data(self, data):
+        """Export data to CSV"""
+        return data.to_csv(index=False)
+
 def main():
     """Main application function"""
     
@@ -55,6 +258,15 @@ def main():
     st.markdown('<div class="main-header">🔬 FACS Data Analysis</div>', 
                 unsafe_allow_html=True)
     st.markdown("---")
+    
+    # Display available libraries
+    library_status = []
+    if FLOWIO_AVAILABLE:
+        library_status.append("✅ FlowIO")
+    if FCSPARSER_AVAILABLE:
+        library_status.append("✅ FCSParser")
+    
+    st.sidebar.markdown(f"**利用可能ライブラリ:** {', '.join(library_status)}")
     
     # Initialize session state
     if 'fcs_data' not in st.session_state:
@@ -98,15 +310,19 @@ def main():
             # Process file button
             if st.button("📊 ファイルを処理", type="primary"):
                 with st.spinner("FCSファイルを処理中..."):
-                    processor, data, metadata = load_and_process_fcs(
-                        uploaded_file, transformation, max_events
-                    )
+                    processor = SimpleFCSProcessor()
+                    data, metadata, channels = processor.load_fcs_file(uploaded_file, max_events)
                     
-                    if processor is not None:
+                    if data is not None:
+                        # Apply transformation
+                        if transformation != "none":
+                            data = processor.apply_transformation(data, transformation)
+                        
                         st.session_state.processor = processor
                         st.session_state.fcs_data = data
                         st.session_state.fcs_metadata = metadata
-                        st.success("✅ 処理が完了しました")
+                        
+                        st.success(f"✅ 処理が完了しました（使用ライブラリ: {processor.library_used}）")
                         st.rerun()
                     else:
                         st.error("❌ ファイルの処理に失敗しました")
@@ -143,6 +359,12 @@ def display_welcome_screen():
                 <li>「ファイルを処理」ボタンをクリック</li>
                 <li>解析結果を確認・可視化</li>
             </ol>
+            
+            <h4>📚 対応ライブラリ：</h4>
+            <ul>
+                <li>FlowIO（推奨）</li>
+                <li>FCSParser（フォールバック）</li>
+            </ul>
         </div>
         """, unsafe_allow_html=True)
 
@@ -184,11 +406,12 @@ def display_file_info(data, metadata, processor):
     with col1:
         st.markdown("**基本情報**")
         info_df = pd.DataFrame([
-            ["総イベント数", f"{file_info.get('total_events', 'N/A'):,}"],
+            ["総イベント数", f"{file_info.get('total_events', 'N/A'):,}" if isinstance(file_info.get('total_events'), (int, float)) else file_info.get('total_events', 'N/A')],
             ["パラメータ数", file_info.get('total_parameters', 'N/A')],
             ["取得日", file_info.get('acquisition_date', 'N/A')],
             ["取得時刻", file_info.get('acquisition_time', 'N/A')],
-            ["サイトメーター", file_info.get('cytometer', 'N/A')]
+            ["サイトメーター", file_info.get('cytometer', 'N/A')],
+            ["使用ライブラリ", processor.library_used]
         ], columns=["項目", "値"])
         st.dataframe(info_df, hide_index=True)
     
@@ -225,7 +448,11 @@ def display_visualization(data):
     st.markdown('<div class="section-header">📈 データ可視化</div>', 
                 unsafe_allow_html=True)
     
-    channels = list(data.columns)
+    channels = list(data.select_dtypes(include=[np.number]).columns)
+    
+    if not channels:
+        st.error("数値チャンネルが見つかりません")
+        return
     
     # Visualization options
     viz_type = st.selectbox(
@@ -324,10 +551,14 @@ def display_gating_interface(data):
     st.markdown('<div class="section-header">🎯 ゲーティング解析</div>', 
                 unsafe_allow_html=True)
     
-    st.info("ゲーティング機能は開発中です。高度なゲーティング機能については、advanced_gating.pyページをご確認ください。")
+    st.info("基本的なゲーティング機能です。高度なゲーティング機能については、advanced_gating.pyページをご確認ください。")
     
-    # Simple threshold gating example
-    channels = list(data.columns)
+    # Simple threshold gating
+    channels = list(data.select_dtypes(include=[np.number]).columns)
+    
+    if not channels:
+        st.error("数値チャンネルが見つかりません")
+        return
     
     col1, col2 = st.columns(2)
     
