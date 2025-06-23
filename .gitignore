@@ -1,5 +1,9 @@
-# .gitignore - Updated for FACS Data Analysis App
-# Migration from flowkit to fcsparser
+# .gitignore - FACS Data Analysis App
+# Optimized for Streamlit-based flow cytometry data analysis
+
+# =============================================================================
+# Python
+# =============================================================================
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -30,8 +34,6 @@ share/python-wheels/
 MANIFEST
 
 # PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
 
@@ -86,33 +88,19 @@ profile_default/
 ipython_config.py
 
 # pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+.python-version
 
 # pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
+Pipfile.lock
 
 # poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
 #poetry.lock
 
 # pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
 #pdm.lock
-#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
-#   in version control.
-#   https://pdm.fming.dev/#use-with-ide
 .pdm.toml
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
+# PEP 582
 __pypackages__/
 
 # Celery stuff
@@ -155,29 +143,70 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+# =============================================================================
+# IDEs and Editors
+# =============================================================================
+
 # PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be added to the global gitignore or merged into this project gitignore.  For a PyCharm
-#  project, it is recommended to create a separate .gitignore file in the root directory
-#  of the project and extend it with the following rules:
-#  PyCharm
 .idea/
 
 # VS Code
 .vscode/
 
-# Streamlit specific
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# =============================================================================
+# Streamlit Specific
+# =============================================================================
+
+# Streamlit secrets (contains sensitive data)
 .streamlit/secrets.toml
+
+# Streamlit cache
+.streamlit/cache/
+
+# Streamlit session state (if stored locally)
+.streamlit/session_state/
+
+# Ensure important Streamlit config is kept
+!.streamlit/config.toml
+
+# =============================================================================
+# FACS Data Analysis Specific
+# =============================================================================
 
 # FCS Data files (usually large and should not be committed)
 *.fcs
 *.FCS
+
+# Data directories
 data/
 sample_data/
 test_data/
 uploads/
+tmp_uploads/
+temp_files/
+.uploaded_files/
+.temp_analysis/
 
-# Analysis results
+# Analysis results and exports
 results/
 output/
 exports/
@@ -189,28 +218,91 @@ exports/
 *.pdf
 *.html
 
+# FACS specific export files
+facs_statistics.csv
+facs_raw_data.csv
+gate_*.csv
+*_gated.csv
+*_transformed.csv
+*_analysis_*.csv
+
+# Gating definitions and saved states
+gate_definitions/
+saved_gates/
+advanced_gates/
+gate_templates/
+custom_gates/
+
+# User-specific analysis files
+user_settings.json
+user_preferences.json
+analysis_history.json
+
+# Temporary analysis files
+*.tmp
+*.temp
+temp_analysis_*.pkl
+
+# =============================================================================
+# System Files
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# =============================================================================
+# Logs and Temporary Files
+# =============================================================================
+
+# Application logs
+logs/
+*.log
+
 # Temporary files
 *.tmp
 *.temp
 *~
-.DS_Store
-Thumbs.db
-
-# Windows specific
-Desktop.ini
-ehthumbs.db
-
-# Logs
-logs/
-*.log
 
 # Cache directories
 .cache/
 cache/
-
-# Pickle files (serialized objects)
-*.pkl
-*.pickle
 
 # Backup files
 *.bak
@@ -221,100 +313,64 @@ cache/
 *.tar.gz
 *.rar
 
-# Configuration files with sensitive data
-config_local.py
-secrets.py
-.env.local
-.env.production
-
-# Documentation build
-docs/build/
-docs/_build/
+# =============================================================================
+# Development and Testing
+# =============================================================================
 
 # Profiling data
-*.prof
-
-# Gate definitions (if containing sensitive data)
-gate_definitions/
-saved_gates/
-
-# User-specific files
-user_settings.json
-user_preferences.json
-
-# Temporary upload directories
-tmp_uploads/
-temp_files/
-
-# Database files
-*.db
-*.sqlite
-
-# R files (if any R integration)
-.Rproj.user/
-.Rhistory
-.RData
-.Ruserdata
-
-# MATLAB files (if any MATLAB integration)
-*.asv
-*.m~
-
-# Jupyter notebook checkpoints
-.ipynb_checkpoints/
-
-# Local development files
-local_config.py
-dev_settings.py
-
-# Performance profiling
 *.prof
 *.profile
 
 # Memory profiling
 *.mem
 
-# Coverage reports
-htmlcov/
-.coverage
-coverage.xml
+# Database files
+*.db
+*.sqlite
 
-# Pytest
-.pytest_cache/
+# Pickle files (serialized objects)
+*.pkl
+*.pickle
 
-# Mypy
-.mypy_cache/
+# Configuration files with sensitive data
+config_local.py
+secrets.py
+.env.local
+.env.production
+local_config.py
+dev_settings.py
 
-# Type checking
-.pytype/
-
-# Pylint
-.pylint.d/
-
-# Bandit security scanner
-.bandit
-
-# Safety scanner
-.safety
-
-# Pre-commit hooks
-.pre-commit-config.yaml
-
-# Local run scripts
+# Local development scripts
 run_local.sh
 run_dev.sh
 start_app.sh
+*.local
 
-# Docker files (if not using Docker)
-Dockerfile
-docker-compose.yml
-.dockerignore
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Kubernetes files (if not using Kubernetes)
-k8s/
-kubernetes/
+# Type checking
+.mypy_cache/
+.pytype/
 
-# Terraform files (if not using Terraform)
-*.tfstate
-*.tfstate.backup
-.terraform/
+# Linting
+.pylint.d/
+
+# Security scanning
+.bandit
+.safety
+
+# =============================================================================
+# Ensure Important Files Are Included
+# =============================================================================
+
+# Ensure these critical files are never ignored
+!config.py
+!requirements.txt
+!README.md
+!.streamlit/config.toml
+!utils/
+!pages/
+!app.py
