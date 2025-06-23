@@ -238,13 +238,14 @@ Streamlitアプリケーションの基本設定：
 maxUploadSize = 100
 headless = true
 enableCORS = false
-enableXsrfProtection = false
+enableXsrfProtection = true  # 実際の設定に合わせる
 
 [theme]
-primaryColor = "#1f77b4"
+primaryColor = "#FF6B35"  # 実際の設定に合わせる（オレンジ）
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f0f2f6"
 textColor = "#262730"
+font = "sans serif"  # 追加
 
 [browser]
 gatherUsageStats = false
