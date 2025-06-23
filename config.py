@@ -216,3 +216,67 @@ def get_success_message(success_key):
 def get_warning_message(warning_key):
     """Get localized warning message"""
     return WARNING_MESSAGES.get(warning_key, 'Warning: Please check your data.')
+
+# =============================================================================
+# 拡張設定 - README.mdとの整合性確保
+# =============================================================================
+
+# ページ固有の設定
+PAGE_CONFIG = {
+    'main_app': {
+        'use_fcs_processor': True,
+        'max_events_range': (1000, 100000),
+        'default_max_events': DATA_CONFIG['max_events_display'],  # 既存設定を参照
+        'export_filenames': {
+            'statistics': 'facs_statistics.csv',
+            'raw_data': 'facs_raw_data.csv'
+        }
+    },
+    'basic_analysis': {
+        'use_fcsparser_direct': True,
+        'max_events_range': (1000, 100000),
+        'default_max_events': DATA_CONFIG['max_events_display'],
+        'dynamic_filename': True
+    }
+}
+
+# 変換方法の統一（既存のDATA_CONFIG['transform_methods']を拡張）
+TRANSFORM_METHODS_UNIFIED = {
+    'none': {'label': 'なし', 'function': 'linear'},
+    'log10': {'label': 'Log10', 'function': 'log'},
+    'asinh': {'label': 'Asinh', 'function': 'asinh'},
+    'biexponential': {'label': 'Biexponential', 'function': 'biexponential'}
+}
+
+# 既存のDATA_CONFIGを更新
+DATA_CONFIG.update({
+    'max_events_range': (1000, 100000),
+    'min_events_display': 1000,
+    'transform_methods_unified': TRANSFORM_METHODS_UNIFIED
+})
+
+# 既存のConfigクラスを拡張
+class Config:
+    # 既存の設定はそのまま維持
+    APP_TITLE = APP_CONFIG['title']
+    PAGE_TITLE = APP_CONFIG['page_title']
+    # ... 既存の設定 ...
+    
+    # 新しい設定を追加
+    PAGE_CONFIG = PAGE_CONFIG
+    TRANSFORM_METHODS_UNIFIED = TRANSFORM_METHODS_UNIFIED
+    
+    @classmethod
+    def get_page_config(cls, page_name):
+        """ページ固有の設定を取得"""
+        return PAGE_CONFIG.get(page_name, {})
+    
+    @classmethod
+    def get_transform_options(cls):
+        """変換方法のオプションを取得"""
+        return list(TRANSFORM_METHODS_UNIFIED.keys())
+    
+    @classmethod
+    def get_transform_label(cls, transform_key):
+        """変換方法の日本語ラベルを取得"""
+        return TRANSFORM_METHODS_UNIFIED.get(transform_key, {}).get('label', transform_key)
