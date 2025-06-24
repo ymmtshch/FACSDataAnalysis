@@ -312,40 +312,48 @@ def main():
         plotting_utils = PlottingUtils()
         
         if plot_type == "散布図":
+            # title引数を削除して、3つの必須引数のみ渡す
             fig = plotting_utils.create_scatter_plot(
                 df_plot_sampled, 
                 x_channel, 
-                y_channel,
-                title=f"{x_channel} vs {y_channel}"
+                y_channel
             )
+            # タイトルを後から設定する場合
+            fig.update_layout(title=f"{x_channel} vs {y_channel}")
             st.plotly_chart(fig, use_container_width=True)
             
         elif plot_type == "密度プロット":
+            # title引数を削除
             fig = plotting_utils.create_density_plot(
                 df_plot_sampled,
                 x_channel,
-                y_channel,
-                title=f"{x_channel} vs {y_channel} 密度プロット"
+                y_channel
             )
+            # タイトルを後から設定
+            fig.update_layout(title=f"{x_channel} vs {y_channel} 密度プロット")
             st.plotly_chart(fig, use_container_width=True)
             
         elif plot_type == "ヒストグラム":
             col1, col2 = st.columns(2)
             
             with col1:
+                # title引数を削除
                 fig_x = plotting_utils.create_histogram(
                     df_plot_sampled,
-                    x_channel,
-                    title=f"{x_channel} ヒストグラム"
+                    x_channel
                 )
+                # タイトルを後から設定
+                fig_x.update_layout(title=f"{x_channel} ヒストグラム")
                 st.plotly_chart(fig_x, use_container_width=True)
             
             with col2:
+                # title引数を削除
                 fig_y = plotting_utils.create_histogram(
                     df_plot_sampled,
-                    y_channel,
-                    title=f"{y_channel} ヒストグラム"
+                    y_channel
                 )
+                # タイトルを後から設定
+                fig_y.update_layout(title=f"{y_channel} ヒストグラム")
                 st.plotly_chart(fig_y, use_container_width=True)
         
         # 統計情報
