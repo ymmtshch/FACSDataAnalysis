@@ -179,8 +179,12 @@ def main():
                 if not isinstance(data, pd.DataFrame):
                     data = pd.DataFrame(data)
                 
-                # FCSProcessorインスタンスを作成
-                processor = FCSProcessor()
+                # ファイルデータを再読み込みしてFCSProcessorに渡す
+                uploaded_file.seek(0)  # ファイルポインタをリセット
+                file_data = uploaded_file.read()
+                
+                # FCSProcessorインスタンスを作成（正しい引数で）
+                processor = FCSProcessor(file_data, uploaded_file.name)
                 
                 # データの前処理
                 df_processed = processor.preprocess_data(data, meta)
@@ -193,7 +197,7 @@ def main():
         st.success(f"✅ ファイル読み込み完了: {uploaded_file.name}")
         
         # ファイル情報の表示
-        st.subheader("📊 ファイル情報")
+        st.subheader("📊 ファイル情報")  
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -215,6 +219,13 @@ def main():
             for key in important_keys:
                 if key in meta:
                     meta_display[key] = meta[key]
+            
+            # FlowKit互換（小文字キー）も確認
+            if not meta_display:
+                flowkit_keys = ['tot', 'par', 'date', 'btim', 'etim', 'cyt', 'cytnum']
+                for key in flowkit_keys:
+                    if key in meta:
+                        meta_display[key] = meta[key]
             
             if meta_display:
                 st.json(meta_display)
