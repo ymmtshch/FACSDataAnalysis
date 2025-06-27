@@ -16,7 +16,7 @@ FACS Data Analysisは、フローサイトメトリーデータ（FCSファイ�
 - **複数の読み込み方式**: 
   - メインアプリ: 統合処理パイプライン（utils/fcs_processor経由）
   - 基本解析ページ: 自動ライブラリ選択による最適化された読み込み
-- **自動ライブラリ選択**: flowio → flowkit → fcsparserの優先順位で最適なライブラリを自動選択
+- **自動ライブラリ選択**: fcsparser → flowioの優先順位で最適なライブラリを自動選択
 - **データ変換**: なし、Log10、Asinh、Biexponential変換に対応
 - **イベント数制御**: パフォーマンス最適化のための最大イベント数設定（1,000～100,000）
 - **リアルタイム処理**: アップロードから解析まで一連の流れをシームレスに実行
@@ -85,20 +85,21 @@ altair>=5.0.0
 ### FCSファイル読み込みライブラリ
 アプリケーションは複数のFCS読み込みライブラリに対応し、自動的に最適なライブラリを選択します：
 
-1. **flowio** (推奨・第一優先)
-   - 最も安定した読み込み性能
-   - NumPy 2.0完全対応
-   - 高速なデータ処理
+1. **fcsparser** (推奨・第一優先)
+   - 長期間にわたり安定した実績
+   - 豊富なメタデータ解析機能
+   - 標準的なFCS形式に最適化
 
-2. **flowkit** (第二優先)
+2. **flowio** (第二優先)
+   - 高速なデータ処理性能
+   - NumPy 2.0完全対応
+   - モダンなデータ処理アーキテクチャ
+
+3. **flowkit** (フォールバック)
    - 高度な解析機能を提供
    - 自動的なデータフレーム変換
 
-3. **fcsparser** (フォールバック)
-   - 従来から使用されているライブラリ
-   - NumPy 2.0で互換性問題の可能性
-
-**注意**: NumPy 2.0環境では、flowioの使用を強く推奨します。
+**注意**: 様々なFCS形式への対応を考慮し、fcsparserを第一優先としていますが、NumPy 2.0環境で互換性問題が発生した場合は自動的にflowioにフォールバックします。
 
 ### 主要ライブラリの用途
 - **streamlit**: Webアプリケーションフレームワーク
@@ -126,9 +127,9 @@ utils/
 pip install streamlit pandas numpy plotly
 
 # FCS読み込みライブラリ（推奨順）
-pip install flowio          # 最優先
-pip install flowkit         # 代替
-pip install fcsparser       # フォールバック
+pip install fcsparser      # 最優先
+pip install flowio          # 代替
+pip install flowkit         # フォールバック
 
 # その他の依存関係
 pip install scipy scikit-image shapely bokeh altair
@@ -411,9 +412,9 @@ st.write("Session state:", st.session_state)
 ## 🔧 トラブルシューティング
 
 ### ライブラリ選択・互換性問題
-- **flowio推奨**: NumPy 2.0環境では必須レベル
-- **fcsparser問題**: "newbyteorder"エラー時の対処法表示
-- **自動フォールバック**: ライブラリエラー時の自動代替選択
+- **fcsparser推奨**: 標準的なFCS形式に最適化されているため第一優先
+- **NumPy 2.0問題**: fcsparserで"newbyteorder"エラー時は自動的にflowioにフォールバック
+- **自動フォールバック**: ライブラリエラー時の自動代替選択機能
 
 ### ファイル読み込みエラー
 - **ファイルサイズ**: 100MB制限を確認
@@ -450,8 +451,8 @@ st.write("Session state:", st.session_state)
 - **メモリリーク**: 大きなデータセット処理後はアプリケーション再起動を推奨
 
 ## 🚨 制限事項
-- **ライブラリ依存**: 最適な動作にはflowioが必要
-- **NumPy互換性**: fcsparserはNumPy 2.0で動作不安定
+- **ライブラリ依存**: 最適な動作にはfcsparserが推奨だが、NumPy 2.0環境ではflowioが安定
+- **NumPy互換性**: fcsparserはNumPy 2.0で動作不安定な場合があり、自動フォールバック機能で対応
 - **チャンネル名**: 特殊文字を含むチャンネル名で表示問題の可能性
 - **メモリ使用量**: 大容量FCSファイルではメモリ制限に注意
 - **同時ユーザー**: Streamlit Cloudでは同時アクセス数に制限
