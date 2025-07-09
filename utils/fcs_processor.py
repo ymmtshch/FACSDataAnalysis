@@ -5,7 +5,7 @@ import streamlit as st
 from typing import Tuple, Dict, Any, Optional
 
 class FCSProcessor:
-    """FCSファイル処理クラス - FlowKit除去版"""
+    """FCSファイル処理クラス - README.md仕様準拠版"""
     
     def __init__(self, file_data: bytes, filename: str):
         self.file_data = file_data
@@ -16,12 +16,35 @@ class FCSProcessor:
         
     def load_fcs_file(self) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
         """
-        FCSファイルを読み込む（FlowKit除去、flowio → fcsparser の順で試行）
+        FCSファイルを読み込む（README.md仕様：fcsparser → flowio → flowkit の順で試行）
         
         Returns:
             Tuple[DataFrame, metadata, used_library]: データ、メタデータ、使用ライブラリ名
         """
-        # FlowIOを最初に試行
+        # fcsparserを最初に試行（README.md仕様：推奨・第一優先）
+        try:
+            import fcsparser
+            
+            # バイトデータをファイルライクオブジェクトに変換
+            file_like = io.BytesIO(self.file_data)
+            meta, data = fcsparser.parse(file_like, reformat_meta=True)
+            
+            # チャンネル名の重複処理
+            if isinstance(data, pd.DataFrame):
+                data.columns = self._handle_duplicate_channels(list(data.columns))
+            
+            self.fcs_data = data
+            self.metadata = meta
+            self.used_library = 'fcsparser'
+            
+            return data, meta, 'fcsparser'
+            
+        except Exception as e:
+            st.warning(f"fcsparserでの読み込みに失敗: {str(e)}")
+            if "newbyteorder" in str(e):
+                st.warning("NumPy 2.0互換性エラーが検出されました。flowioに自動フォールバックします。")
+        
+        # flowioを第二優先として試行
         try:
             import flowio
             fcs = flowio.FlowData(self.file_data)
@@ -35,10 +58,9 @@ class FCSProcessor:
                 else:
                     events = np.array([list(evt) for evt in events])
             
-            # チャンネル名を取得
+            # チャンネル名を取得（README.md仕様：$PnN → $PnS → デフォルト名の順）
             channel_names = []
             for i in range(1, len(fcs.channels) + 1):
-                # $PnN (チャンネル名) → $PnS (ショート名) の順で取得
                 channel_key = f'$P{i}N'
                 short_key = f'$P{i}S'
                 
@@ -67,35 +89,42 @@ class FCSProcessor:
             return df, metadata, 'flowio'
             
         except Exception as e:
-            st.warning(f"FlowIOでの読み込みに失敗: {str(e)}")
+            st.warning(f"flowioでの読み込みに失敗: {str(e)}")
         
-        # fcsparserをフォールバックとして試行
+        # flowkitをフォールバックとして試行（README.md仕様：第三優先）
         try:
-            import fcsparser
+            import flowkit
             
             # バイトデータをファイルライクオブジェクトに変換
             file_like = io.BytesIO(self.file_data)
-            meta, data = fcsparser.parse(file_like, reformat_meta=True)
+            sample = flowkit.Sample(file_like)
+            
+            # データを取得
+            data = sample.as_dataframe()
+            
+            # メタデータを取得
+            metadata = {}
+            if hasattr(sample, 'metadata'):
+                metadata = sample.metadata
             
             # チャンネル名の重複処理
             if isinstance(data, pd.DataFrame):
                 data.columns = self._handle_duplicate_channels(list(data.columns))
             
             self.fcs_data = data
-            self.metadata = meta
-            self.used_library = 'fcsparser'
+            self.metadata = metadata
+            self.used_library = 'flowkit'
             
-            return data, meta, 'fcsparser'
+            return data, metadata, 'flowkit'
             
         except Exception as e:
-            st.error(f"fcsparserでの読み込みも失敗: {str(e)}")
-            if "newbyteorder" in str(e):
-                st.error("NumPy 2.0互換性エラーが発生しました。flowioの使用を推奨します。")
+            st.error(f"flowkitでの読み込みも失敗: {str(e)}")
         
+        st.error("すべてのライブラリでの読み込みに失敗しました。")
         return None, None, None
     
     def _handle_duplicate_channels(self, channel_names: list) -> list:
-        """重複するチャンネル名を処理"""
+        """重複するチャンネル名を処理（README.md仕様：_2, _3等の付加）"""
         seen = {}
         result = []
         
@@ -110,13 +139,13 @@ class FCSProcessor:
         return result
     
     def get_file_info(self) -> Dict[str, Any]:
-        """ファイル基本情報を取得"""
+        """ファイル基本情報を取得（README.md仕様：標準メタデータ + FlowKit互換）"""
         if self.metadata is None:
             return {}
         
         info = {}
         
-        # 総イベント数
+        # 総イベント数（README.md仕様：標準メタデータ + FlowKit互換）
         tot_keys = ['$TOT', 'tot', 'TOTAL', 'total']
         for key in tot_keys:
             if key in self.metadata:
@@ -186,10 +215,17 @@ class FCSProcessor:
                 info['operator'] = self.metadata[key]
                 break
         
+        # ソフトウェア情報（README.md仕様で言及されている項目）
+        software_keys = ['$SYS', 'sys', 'SOFTWARE', 'software']
+        for key in software_keys:
+            if key in self.metadata:
+                info['software'] = self.metadata[key]
+                break
+        
         return info
     
     def get_channel_info(self) -> Dict[str, Any]:
-        """チャンネル詳細情報を取得"""
+        """チャンネル詳細情報を取得（README.md仕様：各チャンネルの詳細情報と設定値）"""
         if self.metadata is None:
             return {}
         
@@ -209,13 +245,18 @@ class FCSProcessor:
         for i in range(1, num_params + 1):
             param_info = {}
             
-            # チャンネル名
+            # チャンネル名（README.md仕様：$PnN → $PnS → デフォルト名の順）
             name_key = f'$P{i}N'
+            short_key = f'$P{i}S'
+            
             if name_key in self.metadata:
                 param_info['name'] = self.metadata[name_key]
+            elif short_key in self.metadata:
+                param_info['name'] = self.metadata[short_key]
+            else:
+                param_info['name'] = f'Channel_{i}'
             
             # ショート名
-            short_key = f'$P{i}S'
             if short_key in self.metadata:
                 param_info['short_name'] = self.metadata[short_key]
             
@@ -239,12 +280,17 @@ class FCSProcessor:
             if voltage_key in self.metadata:
                 param_info['voltage'] = self.metadata[voltage_key]
             
+            # 増幅器タイプ
+            amp_key = f'$P{i}T'
+            if amp_key in self.metadata:
+                param_info['amplifier_type'] = self.metadata[amp_key]
+            
             channel_info[f'P{i}'] = param_info
         
         return channel_info
     
     def get_basic_stats(self) -> Dict[str, Any]:
-        """基本統計情報を取得"""
+        """基本統計情報を取得（README.md仕様：平均値、中央値、標準偏差、最小値、最大値）"""
         if self.fcs_data is None:
             return {}
         
@@ -272,7 +318,7 @@ class FCSProcessor:
         return stats
     
     def preprocess_data(self, data: pd.DataFrame, metadata: Dict) -> pd.DataFrame:
-        """データの前処理"""
+        """データの前処理（README.md仕様：数値データのみ保持、NaN値削除）"""
         if data is None:
             return pd.DataFrame()
         
@@ -286,7 +332,7 @@ class FCSProcessor:
         return processed_data
     
     def apply_transform(self, data: pd.Series, transform_type: str) -> pd.Series:
-        """データ変換を適用"""
+        """データ変換を適用（README.md仕様：なし、Log10、Asinh、Biexponential変換）"""
         if transform_type == "なし" or transform_type == "None":
             return data
         
@@ -298,10 +344,11 @@ class FCSProcessor:
                 return np.log10(data_transformed)
             
             elif transform_type == "Asinh":
+                # README.md仕様：Asinh変換
                 return np.arcsinh(data / 1000)  # スケール調整
             
             elif transform_type == "Biexponential":
-                # 簡易的なbiexponential変換
+                # README.md仕様：Biexponential変換（簡易実装）
                 return np.sign(data) * np.log10(1 + np.abs(data))
             
             else:
@@ -312,17 +359,19 @@ class FCSProcessor:
             return data
     
     def export_data(self, data: pd.DataFrame, data_type: str = "data") -> str:
-        """データをCSV形式でエクスポート"""
+        """データをCSV形式でエクスポート（README.md仕様：自動命名）"""
         if data.empty:
             return ""
         
         try:
-            # ファイル名から拡張子を除去
+            # README.md仕様：自動ファイル命名
             base_name = self.filename.rsplit('.', 1)[0] if '.' in self.filename else self.filename
             
             if data_type == "stats":
+                # 統計情報: {元ファイル名}_stats.csv
                 filename = f"{base_name}_stats.csv"
             else:
+                # 表示データ: {元ファイル名}_data.csv
                 filename = f"{base_name}_data.csv"
             
             # CSVに変換
@@ -332,16 +381,38 @@ class FCSProcessor:
         except Exception as e:
             st.error(f"データエクスポートエラー: {str(e)}")
             return ""
+    
+    def get_all_metadata(self, limit: int = 20) -> Dict[str, Any]:
+        """全メタデータを取得（README.md仕様：オプションで全メタデータ項目の表示）"""
+        if self.metadata is None:
+            return {}
+        
+        # 制限数まで表示
+        items = list(self.metadata.items())[:limit]
+        return dict(items)
+    
+    def get_debug_info(self) -> Dict[str, Any]:
+        """デバッグ情報を取得（README.md仕様：使用ライブラリ、データ変換プロセスの詳細表示）"""
+        debug_info = {
+            'used_library': self.used_library,
+            'filename': self.filename,
+            'data_shape': self.fcs_data.shape if self.fcs_data is not None else None,
+            'data_type': str(type(self.fcs_data)) if self.fcs_data is not None else None,
+            'metadata_keys_count': len(self.metadata) if self.metadata else 0,
+            'column_names': list(self.fcs_data.columns) if self.fcs_data is not None else []
+        }
+        
+        return debug_info
 
 
 def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_events: int = 10000) -> Tuple[Optional['FCSProcessor'], Optional[pd.DataFrame], Optional[Dict]]:
     """
-    FCSファイルを読み込んで処理する主要関数（FlowKit除去版）
+    FCSファイルを読み込んで処理する主要関数（README.md仕様準拠）
     
     Args:
         uploaded_file: Streamlitのアップロードファイル
-        transformation: データ変換タイプ
-        max_events: 最大イベント数
+        transformation: データ変換タイプ（なし、Log10、Asinh、Biexponential）
+        max_events: 最大イベント数（README.md仕様：1,000～100,000）
     
     Returns:
         Tuple[FCSProcessor, DataFrame, metadata]: プロセッサ、データ、メタデータ
@@ -357,7 +428,7 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         # FCSProcessorを初期化
         processor = FCSProcessor(file_data, filename)
         
-        # FCSファイルを読み込み
+        # FCSファイルを読み込み（README.md仕様：fcsparser → flowio → flowkit）
         data, metadata, used_library = processor.load_fcs_file()
         
         if data is None:
@@ -367,15 +438,17 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         # データの前処理
         processed_data = processor.preprocess_data(data, metadata)
         
-        # イベント数制限
+        # README.md仕様：パフォーマンス最適化のための最大イベント数設定
         if len(processed_data) > max_events:
             processed_data = processed_data.sample(n=max_events, random_state=42)
+            st.info(f"パフォーマンス最適化のため、{max_events:,}イベントにサンプリングしました。")
         
-        # データ変換（全列に適用）
+        # データ変換（README.md仕様：なし、Log10、Asinh、Biexponential変換）
         if transformation != "なし":
             for col in processed_data.columns:
                 processed_data[col] = processor.apply_transform(processed_data[col], transformation)
         
+        # README.md仕様：使用ライブラリ表示
         st.success(f"FCSファイルが正常に読み込まれました（使用ライブラリ: {used_library}）")
         
         return processor, processed_data, metadata
