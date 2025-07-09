@@ -1,11 +1,5 @@
 # .streamlit/config.toml - Streamlit configuration for FACS Data Analysis App
 
-[global]
-# Development mode settings
-developmentMode = false
-logLevel = "info"
-unitTest = false
-
 [server]
 # Server configuration
 port = 8501
@@ -24,7 +18,7 @@ serverAddress = "localhost"
 serverPort = 8501
 
 [theme]
-# Theme configuration
+# Theme configuration matching FACS Data Analysis App
 primaryColor = "#FF6B35"
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F0F2F6"
@@ -54,3 +48,9 @@ showImageFormat = false
 # UI configuration
 hideTopBar = false
 hideSidebarNav = false
+
+[global]
+# Development mode settings
+developmentMode = false
+logLevel = "info"
+unitTest = false
