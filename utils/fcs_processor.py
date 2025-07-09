@@ -121,7 +121,7 @@ class FCSProcessor:
             st.error(f"flowkitでの読み込みも失敗: {str(e)}")
         
         st.error("すべてのライブラリでの読み込みに失敗しました。")
-        return None, None, None
+        return None, None, None # データ、メタデータ、使用ライブラリ
     
     def _handle_duplicate_channels(self, channel_names: list) -> list:
         """重複するチャンネル名を処理（README.md仕様：_2, _3等の付加）"""
@@ -405,7 +405,7 @@ class FCSProcessor:
         return debug_info
 
 
-def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_events: int = 10000) -> Tuple[Optional['FCSProcessor'], Optional[pd.DataFrame], Optional[Dict]]:
+def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_events: int = 10000) -> Tuple[Optional['FCSProcessor'], Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
     """
     FCSファイルを読み込んで処理する主要関数（README.md仕様準拠）
     
@@ -415,10 +415,10 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         max_events: 最大イベント数（README.md仕様：1,000～100,000）
     
     Returns:
-        Tuple[FCSProcessor, DataFrame, metadata]: プロセッサ、データ、メタデータ
+        Tuple[FCSProcessor, DataFrame, metadata, error_message]: プロセッサ、データ、メタデータ、エラーメッセージ
     """
     if uploaded_file is None:
-        return None, None, None
+        return None, None, None, "ファイルがアップロードされていません。"
     
     try:
         # ファイルデータを読み込み
@@ -429,11 +429,12 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         processor = FCSProcessor(file_data, filename)
         
         # FCSファイルを読み込み（README.md仕様：fcsparser → flowio → flowkit）
+        # load_fcs_fileは (data_df, metadata_dict, used_library) を返す
         data, metadata, used_library = processor.load_fcs_file()
         
         if data is None:
-            st.error("FCSファイルの読み込みに失敗しました。")
-            return None, None, None
+            # load_fcs_fileがNoneを返した場合、エラーメッセージはStreamlitのst.errorで出力済みなので、ここでは汎用エラーメッセージを返す
+            return None, None, None, "FCSファイルの読み込みに失敗しました。"
         
         # データの前処理
         processed_data = processor.preprocess_data(data, metadata)
@@ -451,8 +452,8 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         # README.md仕様：使用ライブラリ表示
         st.success(f"FCSファイルが正常に読み込まれました（使用ライブラリ: {used_library}）")
         
-        return processor, processed_data, metadata
+        return processor, processed_data, metadata, None # 成功時はエラーメッセージをNoneにする
         
     except Exception as e:
         st.error(f"ファイル処理エラー: {str(e)}")
-        return None, None, None
+        return None, None, None, f"ファイル処理中に予期せぬエラーが発生しました: {str(e)}"
