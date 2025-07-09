@@ -179,10 +179,8 @@ tramp
 # Streamlit secrets (contains sensitive data)
 .streamlit/secrets.toml
 
-# Streamlit cache
+# Streamlit cache and session data
 .streamlit/cache/
-
-# Streamlit session state (if stored locally)
 .streamlit/session_state/
 
 # Ensure important Streamlit config is kept
@@ -210,21 +208,27 @@ temp_files/
 results/
 output/
 exports/
-*.csv
-*.xlsx
+
+# CSV export files (as mentioned in README)
+facs_statistics.csv
+facs_raw_data.csv
+*_stats.csv
+*_data.csv
+gate_*.csv
+*_gated.csv
+*_transformed.csv
+*_analysis_*.csv
+
+# Image exports
 *.png
 *.jpg
 *.jpeg
 *.pdf
 *.html
 
-# FACS specific export files
-facs_statistics.csv
-facs_raw_data.csv
-gate_*.csv
-*_gated.csv
-*_transformed.csv
-*_analysis_*.csv
+# Excel exports
+*.xlsx
+*.xls
 
 # Gating definitions and saved states
 gate_definitions/
@@ -242,6 +246,13 @@ analysis_history.json
 *.tmp
 *.temp
 temp_analysis_*.pkl
+
+# FlowIO/fcsparser specific cache
+.fcs_cache/
+.flowio_cache/
+
+# Plotly temporary files
+.plotly_temp/
 
 # =============================================================================
 # System Files
@@ -374,3 +385,8 @@ htmlcov/
 !utils/
 !pages/
 !app.py
+!utils/fcs_processor.py
+!utils/plotting.py
+!utils/gating.py
+!pages/basic_analysis.py
+!pages/advanced_gating.py
