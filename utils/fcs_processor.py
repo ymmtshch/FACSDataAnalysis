@@ -40,9 +40,10 @@ class FCSProcessor:
             return data, meta, 'fcsparser'
             
         except Exception as e:
-            st.warning(f"fcsparserでの読み込みに失敗: {str(e)}")
-            if "newbyteorder" in str(e):
-                st.warning("NumPy 2.0互換性エラーが検出されました。flowioに自動フォールバックします。")
+            # ここに詳細なエラーログを追加
+            st.warning(f"fcsparserでの読み込みに失敗しました。FlowIOを試します。詳細: {str(e)}") # <- 修正済みログメッセージ
+            if "newbyteorder" in str(e) or "failed to decode" in str(e): # NumPy 2.0 / デコードエラーも考慮
+                st.info("NumPy 2.0互換性またはデコードエラーが検出されました。flowioに自動フォールバックします。")
         
         # flowioを第二優先として試行
         try:
@@ -60,7 +61,9 @@ class FCSProcessor:
             
             # チャンネル名を取得（README.md仕様：$PnN → $PnS → デフォルト名の順）
             channel_names = []
-            for i in range(1, len(fcs.channels) + 1):
+            # $PAR キーが存在するか確認し、存在しない場合はfcs.channelsの長さを使用
+            num_channels = int(fcs.text.get('$PAR', len(fcs.channels)))
+            for i in range(1, num_channels + 1):
                 channel_key = f'$P{i}N'
                 short_key = f'$P{i}S'
                 
@@ -89,7 +92,8 @@ class FCSProcessor:
             return df, metadata, 'flowio'
             
         except Exception as e:
-            st.warning(f"flowioでの読み込みに失敗: {str(e)}")
+            # ここに詳細なエラーログを追加
+            st.warning(f"flowioでの読み込みに失敗しました。FlowKitを試します。詳細: {str(e)}") # <- 修正済みログメッセージ
         
         # flowkitをフォールバックとして試行（README.md仕様：第三優先）
         try:
@@ -118,7 +122,8 @@ class FCSProcessor:
             return data, metadata, 'flowkit'
             
         except Exception as e:
-            st.error(f"flowkitでの読み込みも失敗: {str(e)}")
+            # ここに詳細なエラーログを追加
+            st.error(f"flowkitでの読み込みにも失敗しました。詳細: {str(e)}") # <- 修正済みログメッセージ
         
         st.error("すべてのライブラリでの読み込みに失敗しました。")
         return None, None, None # データ、メタデータ、使用ライブラリ
@@ -151,13 +156,17 @@ class FCSProcessor:
             if key in self.metadata:
                 info['total_events'] = int(self.metadata[key])
                 break
-        
+        else: # 見つからなかった場合
+            info['total_events'] = 'N/A'
+
         # パラメータ数
         par_keys = ['$PAR', 'par', 'PARAMETERS', 'parameters']
         for key in par_keys:
             if key in self.metadata:
                 info['parameters'] = int(self.metadata[key])
                 break
+        else: # 見つからなかった場合
+            info['parameters'] = 'N/A'
         
         # 取得日時
         date_keys = ['$DATE', 'date', 'DATE']
@@ -165,6 +174,7 @@ class FCSProcessor:
             if key in self.metadata:
                 info['date'] = self.metadata[key]
                 break
+        else: info['date'] = 'N/A'
         
         # 取得開始時刻
         btim_keys = ['$BTIM', 'btim', 'BTIM']
@@ -172,6 +182,7 @@ class FCSProcessor:
             if key in self.metadata:
                 info['begin_time'] = self.metadata[key]
                 break
+        else: info['begin_time'] = 'N/A'
         
         # 取得終了時刻
         etim_keys = ['$ETIM', 'etim', 'ETIM']
@@ -179,6 +190,7 @@ class FCSProcessor:
             if key in self.metadata:
                 info['end_time'] = self.metadata[key]
                 break
+        else: info['end_time'] = 'N/A'
         
         # 使用機器
         cyt_keys = ['$CYT', 'cyt', 'CYTOMETER']
@@ -186,6 +198,7 @@ class FCSProcessor:
             if key in self.metadata:
                 info['cytometer'] = self.metadata[key]
                 break
+        else: info['cytometer'] = 'N/A'
         
         # 機器番号
         cytnum_keys = ['$CYTNUM', 'cytnum', 'CYTNUM']
@@ -193,6 +206,7 @@ class FCSProcessor:
             if key in self.metadata:
                 info['cytometer_number'] = self.metadata[key]
                 break
+        else: info['cytometer_number'] = 'N/A'
         
         # 実験名
         exp_keys = ['EXPERIMENT NAME', '$EXP', 'exp', 'EXPERIMENT']
@@ -200,6 +214,7 @@ class FCSProcessor:
             if key in self.metadata:
                 info['experiment_name'] = self.metadata[key]
                 break
+        else: info['experiment_name'] = 'N/A'
         
         # サンプルID
         sample_keys = ['SAMPLE ID', '$SMNO', 'smno', 'SAMPLE']
@@ -207,6 +222,7 @@ class FCSProcessor:
             if key in self.metadata:
                 info['sample_id'] = self.metadata[key]
                 break
+        else: info['sample_id'] = 'N/A'
         
         # オペレーター
         op_keys = ['$OP', 'op', 'OPERATOR']
@@ -214,6 +230,7 @@ class FCSProcessor:
             if key in self.metadata:
                 info['operator'] = self.metadata[key]
                 break
+        else: info['operator'] = 'N/A'
         
         # ソフトウェア情報（README.md仕様で言及されている項目）
         software_keys = ['$SYS', 'sys', 'SOFTWARE', 'software']
@@ -221,71 +238,63 @@ class FCSProcessor:
             if key in self.metadata:
                 info['software'] = self.metadata[key]
                 break
+        else: info['software'] = 'N/A'
         
         return info
     
     def get_channel_info(self) -> Dict[str, Any]:
         """チャンネル詳細情報を取得（README.md仕様：各チャンネルの詳細情報と設定値）"""
-        if self.metadata is None:
+        if self.metadata is None or self.fcs_data is None:
             return {}
         
         channel_info = {}
         
-        # パラメータ数を取得
-        par_keys = ['$PAR', 'par', 'PARAMETERS']
-        num_params = None
-        for key in par_keys:
-            if key in self.metadata:
-                num_params = int(self.metadata[key])
-                break
-        
-        if num_params is None:
-            return {}
-        
-        for i in range(1, num_params + 1):
+        # DataFrameのカラム名からチャンネル情報を取得する
+        for i, col_name in enumerate(self.fcs_data.columns):
             param_info = {}
             
-            # チャンネル名（README.md仕様：$PnN → $PnS → デフォルト名の順）
-            name_key = f'$P{i}N'
-            short_key = f'$P{i}S'
+            # チャンネル名（$PnN を優先、$PnS があればそれも取得）
+            name_key = f'$P{i+1}N'
+            short_key = f'$P{i+1}S'
             
-            if name_key in self.metadata:
-                param_info['name'] = self.metadata[name_key]
-            elif short_key in self.metadata:
-                param_info['name'] = self.metadata[short_key]
+            display_name = self.metadata.get(name_key, col_name)
+            detector_name = self.metadata.get(short_key, '')
+
+            # 表示名と検出器名を結合してより分かりやすい名前を作成
+            if display_name and detector_name and display_name != detector_name:
+                full_channel_name = f"{display_name} ({detector_name})"
+            elif display_name:
+                full_channel_name = display_name
+            elif detector_name:
+                full_channel_name = detector_name
             else:
-                param_info['name'] = f'Channel_{i}'
+                full_channel_name = col_name # どちらもなければ元のカラム名
             
-            # ショート名
-            if short_key in self.metadata:
-                param_info['short_name'] = self.metadata[short_key]
+            param_info['name'] = full_channel_name
+            if detector_name:
+                param_info['short_name'] = detector_name # 検出器名をショート名として保持
             
             # レンジ
-            range_key = f'$P{i}R'
-            if range_key in self.metadata:
-                param_info['range'] = self.metadata[range_key]
+            range_key = f'$P{i+1}R'
+            param_info['range'] = self.metadata.get(range_key, 'N/A')
             
             # ビット数
-            bits_key = f'$P{i}B'
-            if bits_key in self.metadata:
-                param_info['bits'] = self.metadata[bits_key]
+            bits_key = f'$P{i+1}B'
+            param_info['bits'] = self.metadata.get(bits_key, 'N/A')
             
             # ゲイン
-            gain_key = f'$P{i}G'
-            if gain_key in self.metadata:
-                param_info['gain'] = self.metadata[gain_key]
+            gain_key = f'$P{i+1}G'
+            param_info['gain'] = self.metadata.get(gain_key, 'N/A')
             
             # 電圧
-            voltage_key = f'$P{i}V'
-            if voltage_key in self.metadata:
-                param_info['voltage'] = self.metadata[voltage_key]
+            voltage_key = f'$P{i+1}V'
+            param_info['voltage'] = self.metadata.get(voltage_key, 'N/A')
             
             # 増幅器タイプ
-            amp_key = f'$P{i}T'
-            if amp_key in self.metadata:
-                param_info['amplifier_type'] = self.metadata[amp_key]
+            amp_key = f'$P{i+1}T'
+            param_info['amplifier_type'] = self.metadata.get(amp_key, 'N/A')
             
-            channel_info[f'P{i}'] = param_info
+            channel_info[f'P{i+1}'] = param_info
         
         return channel_info
     
@@ -313,6 +322,7 @@ class FCSProcessor:
                     }
             except Exception as e:
                 # 統計計算に失敗した場合はスキップ
+                st.warning(f"チャンネル '{col}' の統計計算に失敗しました: {e}")
                 continue
         
         return stats
@@ -345,12 +355,21 @@ class FCSProcessor:
             
             elif transform_type == "Asinh":
                 # README.md仕様：Asinh変換
-                return np.arcsinh(data / 1000)  # スケール調整
+                # co-factor (e.g., 150, 5) はFCSファイルから取得するか、デフォルト値を使用
+                # ここでは簡易的に1000をco-factorとして使用
+                return np.arcsinh(data / 1000)
             
             elif transform_type == "Biexponential":
                 # README.md仕様：Biexponential変換（簡易実装）
-                return np.sign(data) * np.log10(1 + np.abs(data))
-            
+                # Biexponential変換は複雑なため、より簡易的な対数変換を適用
+                # FlowJoのBiexponentialは、負の値も扱える対数変換に近い
+                # ここでは np.arcsinh をより低レンジに適用する例
+                # `w` パラメータは通常メタデータから取得されるが、ここでは固定値
+                w = 0.5 # 負の値をどれくらい直線的にするかを制御するパラメータ
+                data_transformed = data.copy()
+                return np.where(data_transformed >= 0, 
+                                np.log10(data_transformed + 1), 
+                                -np.log10(np.abs(data_transformed) + 1) * (1 / w))
             else:
                 return data
                 
@@ -388,7 +407,9 @@ class FCSProcessor:
             return {}
         
         # 制限数まで表示
-        items = list(self.metadata.items())[:limit]
+        items = list(self.metadata.items())
+        if limit and limit > 0:
+            items = items[:limit]
         return dict(items)
     
     def get_debug_info(self) -> Dict[str, Any]:
@@ -434,6 +455,8 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         
         if data is None:
             # load_fcs_fileがNoneを返した場合、エラーメッセージはStreamlitのst.errorで出力済みなので、ここでは汎用エラーメッセージを返す
+            # FCSProcessor.load_fcs_file() の最終 return で st.error が呼ばれているため、ここでは詳細なエラーメッセージではなく、
+            # 呼び出し元 (app.py) に返すための簡潔なメッセージとする
             return None, None, None, "FCSファイルの読み込みに失敗しました。"
         
         # データの前処理
@@ -447,13 +470,17 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         # データ変換（README.md仕様：なし、Log10、Asinh、Biexponential変換）
         if transformation != "なし":
             for col in processed_data.columns:
-                processed_data[col] = processor.apply_transform(processed_data[col], transformation)
+                # 数値型カラムのみ変換を適用
+                if pd.api.types.is_numeric_dtype(processed_data[col]):
+                    processed_data[col] = processor.apply_transform(processed_data[col], transformation)
         
         # README.md仕様：使用ライブラリ表示
         st.success(f"FCSファイルが正常に読み込まれました（使用ライブラリ: {used_library}）")
         
-        return processor, processed_data, metadata, None # 成功時はエラーメッセージをNoneにする
+        # 成功時はエラーメッセージをNoneにする
+        return processor, processed_data, metadata, None
         
     except Exception as e:
-        st.error(f"ファイル処理エラー: {str(e)}")
+        # 予期せぬエラーが発生した場合
+        st.error(f"ファイル処理中に予期せぬエラーが発生しました: {str(e)}")
         return None, None, None, f"ファイル処理中に予期せぬエラーが発生しました: {str(e)}"
