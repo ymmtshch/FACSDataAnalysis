@@ -4,12 +4,19 @@ Streamlit-based web application for flow cytometry data analysis
 Updated according to README specifications
 """
 
+# app.py
+"""
+FACS Data Analysis - Main Application
+Streamlit-based web application for flow cytometry data analysis
+Updated according to README specifications
+"""
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import io
+import io # FCSProcessorが内部でio.BytesIOを使用するため、ここでの直接利用は不要だが、FCSProcessorクラスへのインポートは残す
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -18,40 +25,12 @@ try:
     from utils.fcs_processor import FCSProcessor, load_and_process_fcs
     from utils.plotting import PlottingUtils
     UTILS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     UTILS_AVAILABLE = False
-    st.error("❌ 必須のutilsモジュールが見つかりません。utils/fcs_processor.py、utils/plotting.pyが必要です。")
+    st.error(f"❌ 必須のutilsモジュールが見つかりません: {e}。utils/fcs_processor.py、utils/plotting.pyが必要です。")
+    st.stop() # utilsが見つからない場合はここで停止
 
-# FCS file reading libraries (in order of preference as per README)
-try:
-    import fcsparser
-    FCSPARSER_AVAILABLE = True
-except ImportError:
-    FCSPARSER_AVAILABLE = False
-
-try:
-    import flowio
-    FLOWIO_AVAILABLE = True
-except ImportError:
-    FLOWIO_AVAILABLE = False
-
-try:
-    import flowkit
-    FLOWKIT_AVAILABLE = True
-except ImportError:
-    FLOWKIT_AVAILABLE = False
-
-# Check if any FCS library is available
-if not FCSPARSER_AVAILABLE and not FLOWIO_AVAILABLE and not FLOWKIT_AVAILABLE:
-    st.error("❌ FCSファイル読み込みライブラリが見つかりません。fcsparser、flowio、またはflowkitをインストールしてください。")
-    st.stop()
-
-# Check for utils availability
-if not UTILS_AVAILABLE:
-    st.warning("⚠️ utilsモジュールが利用できません。基本機能のみ提供されます。")
-    st.stop()
-
-# Page configuration - as specified in README
+# Streamlitページ設定 - README仕様に準拠
 st.set_page_config(
     page_title="FACS Data Analysis",
     page_icon="🔬",
@@ -108,190 +87,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-class SimpleFCSProcessor:
-    """Simplified FCS processor without FlowKit dependency"""
-    
-    def __init__(self):
-        self.data = None
-        self.metadata = None
-        self.channels = None
-        self.library_used = None
-    
-    def load_fcs_file(self, file, max_events=10000):
-        """Load FCS file using available libraries"""
-        try:
-            # Try flowio first (recommended)
-            if FLOWIO_AVAILABLE:
-                return self._load_with_flowio(file, max_events)
-            elif FCSPARSER_AVAILABLE:
-                return self._load_with_fcsparser(file, max_events)
-            else:
-                raise ImportError("No FCS reading library available")
-        except Exception as e:
-            st.error(f"❌ FCSファイルの読み込みに失敗しました: {str(e)}")
-            return None, None, None
-    
-    def _load_with_flowio(self, file, max_events):
-        """Load FCS file using flowio"""
-        try:
-            fcs = flowio.FlowData(file.getvalue())
-            self.library_used = "flowio"
-            
-            # Get event data
-            events = fcs.events
-            if isinstance(events, np.ndarray):
-                data_array = events
-            else:
-                # Handle array.array case
-                data_array = np.array(events)
-            
-            # Reshape if needed
-            if len(data_array.shape) == 1:
-                n_params = int(fcs.text.get('$PAR', 0))
-                if n_params > 0:
-                    data_array = data_array.reshape(-1, n_params)
-            
-            # Limit events
-            if len(data_array) > max_events:
-                indices = np.random.choice(len(data_array), max_events, replace=False)
-                data_array = data_array[indices]
-            
-            # Get channel names
-            channels = []
-            n_params = int(fcs.text.get('$PAR', 0))
-            for i in range(1, n_params + 1):
-                channel_name = fcs.text.get(f'$P{i}N', f'Channel_{i}')
-                if not channel_name or channel_name == '':
-                    channel_name = fcs.text.get(f'$P{i}S', f'Channel_{i}')
-                channels.append(channel_name)
-            
-            # Create DataFrame
-            df = pd.DataFrame(data_array, columns=channels)
-            
-            # Store metadata
-            self.metadata = dict(fcs.text)
-            self.channels = channels
-            self.data = df
-            
-            return df, self.metadata, channels
-            
-        except Exception as e:
-            st.error(f"FlowIO読み込みエラー: {str(e)}")
-            return None, None, None
-    
-    def _load_with_fcsparser(self, file, max_events):
-        """Load FCS file using fcsparser"""
-        try:
-            # Reset file pointer
-            file.seek(0)
-            
-            # Read with fcsparser
-            metadata, data = fcsparser.parse(file, meta_data_only=False, reformat_meta=True)
-            self.library_used = "fcsparser"
-            
-            # Limit events
-            if len(data) > max_events:
-                data = data.sample(n=max_events, random_state=42)
-            
-            # Get channel names
-            channels = list(data.columns)
-            
-            # Store data
-            self.metadata = metadata
-            self.channels = channels
-            self.data = data
-            
-            return data, metadata, channels
-            
-        except Exception as e:
-            st.error(f"FCSParser読み込みエラー: {str(e)}")
-            return None, None, None
-    
-    def apply_transformation(self, data, transformation="none"):
-        """Apply data transformation"""
-        if transformation == "none":
-            return data
-        
-        transformed_data = data.copy()
-        
-        for column in data.select_dtypes(include=[np.number]).columns:
-            if transformation == "log":
-                # Log10 transformation (add small value to avoid log(0))
-                transformed_data[column] = np.log10(data[column] + 1)
-            elif transformation == "asinh":
-                # Asinh transformation
-                transformed_data[column] = np.arcsinh(data[column] / 150)
-            elif transformation == "biexp":
-                # Simple biexponential approximation
-                transformed_data[column] = np.sign(data[column]) * np.log10(np.abs(data[column]) + 1)
-        
-        return transformed_data
-    
-    def get_file_info(self):
-        """Get basic file information"""
-        if self.metadata is None:
-            return {}
-        
-        info = {}
-        
-        # Basic information
-        info['total_events'] = self.metadata.get('$TOT', 'N/A')
-        info['total_parameters'] = self.metadata.get('$PAR', 'N/A')
-        info['acquisition_date'] = self.metadata.get('$DATE', 'N/A')
-        info['acquisition_time'] = self.metadata.get('$BTIM', 'N/A')
-        info['cytometer'] = self.metadata.get('$CYT', 'N/A')
-        
-        # Experiment information
-        info['experiment_name'] = self.metadata.get('$EXP', 'N/A')
-        info['sample_id'] = self.metadata.get('$SMNO', 'N/A')
-        info['operator'] = self.metadata.get('$OP', 'N/A')
-        info['software'] = self.metadata.get('$SRC', 'N/A')
-        
-        return info
-    
-    def get_channel_info(self):
-        """Get channel information"""
-        if self.metadata is None or self.channels is None:
-            return {}
-        
-        channel_info = {}
-        n_params = int(self.metadata.get('$PAR', 0))
-        
-        for i in range(1, n_params + 1):
-            channel_name = self.channels[i-1] if i-1 < len(self.channels) else f'Channel_{i}'
-            
-            channel_info[channel_name] = {
-                'Range': self.metadata.get(f'$P{i}R', 'N/A'),
-                'Bits': self.metadata.get(f'$P{i}B', 'N/A'),
-                'Gain': self.metadata.get(f'$P{i}G', 'N/A'),
-                'Voltage': self.metadata.get(f'$P{i}V', 'N/A')
-            }
-        
-        return channel_info
-    
-    def get_basic_stats(self):
-        """Get basic statistics for all channels"""
-        if self.data is None:
-            return {}
-        
-        stats = {}
-        numeric_columns = self.data.select_dtypes(include=[np.number]).columns
-        
-        for column in numeric_columns:
-            stats[column] = {
-                'Mean': self.data[column].mean(),
-                'Median': self.data[column].median(),
-                'Std': self.data[column].std(),
-                'Min': self.data[column].min(),
-                'Max': self.data[column].max(),
-                'Count': self.data[column].count()
-            }
-        
-        return stats
-    
-    def export_data(self, data):
-        """Export data to CSV"""
-        return data.to_csv(index=False)
+# --- SimpleFCSProcessorクラスは削除します ---
 
 def main():
     """Main application function - Updated according to README specifications"""
@@ -302,7 +98,7 @@ def main():
     st.markdown("*StreamlitベースのFACS（フローサイトメトリー）データ解析Webアプリケーション*")
     st.markdown("---")
     
-    # Display available libraries status
+    # Display available libraries status (utils内のFCSProcessorが使用するライブラリのステータスを表示)
     display_library_status()
     
     # Initialize session state
@@ -318,24 +114,34 @@ def main():
         display_welcome_screen()
 
 def display_library_status():
-    """Display available FCS libraries status"""
+    """Display available FCS libraries status, determined by FCSProcessor's ability to import them."""
     st.sidebar.markdown("### 📚 利用可能ライブラリ")
     
-    libraries = [
-        ("FCSParser", FCSPARSER_AVAILABLE, "推奨・第一優先"),
-        ("FlowIO", FLOWIO_AVAILABLE, "第二優先"),
-        ("FlowKit", FLOWKIT_AVAILABLE, "フォールバック")
-    ]
+    # FCSProcessorが依存するライブラリの有無をここで直接チェックすることはしない。
+    # 代わりに、FCSProcessorが実際にどのライブラリを使って読み込んだかを表示する。
+    # ただし、アプリ起動時の一般的な情報として表示することは可能。
+    # 実際にはFCSProcessorのload_fcs_fileがtry-exceptで吸収するので、
+    # ここでの個別のimport check & st.stop()は不要。
     
-    for lib_name, available, priority in libraries:
-        status_class = "library-available" if available else "library-unavailable"
-        status_icon = "✅" if available else "❌"
-        st.sidebar.markdown(
-            f'<div class="library-status {status_class}">'
-            f'{status_icon} {lib_name} ({priority})'
-            f'</div>',
-            unsafe_allow_html=True
-        )
+    # FCSProcessorがロードに成功した際に、どのライブラリを使用したかをprocessorオブジェクトから取得して表示するのがベスト。
+    # ここでは、アプリケーションのスタート時に一般的な情報として存在するかどうかのみを示す。
+    
+    # ここでfcsparser, flowio, flowkitを再importするのは冗長。
+    # FCSProcessor内部で判断されるため、ここではあくまで「情報」として表示するに留める。
+    
+    # 以下は情報表示のための仮のフラグ。実際のimportはFCSProcessorが行う。
+    # 理想的にはFCSProcessorからget_available_libraries()のようなメソッドがあれば良いが、今回はそこまで踏み込まない。
+    
+    # 現状のコードではFlowIO_AVAILABLEなどのグローバル変数がないため、ここでは単にメッセージを表示する
+    st.sidebar.markdown(
+        f'<div class="library-status library-available">✅ FCSファイル読み込みライブラリはutils/fcs_processorで管理されます。</div>',
+        unsafe_allow_html=True
+    )
+    st.sidebar.markdown(
+        f'<div class="library-status library-available">💡 読み込み時に最適なライブラリ（fcsparser > flowio > flowkit）を自動選択します。</div>',
+        unsafe_allow_html=True
+    )
+
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -348,7 +154,7 @@ def initialize_session_state():
     if 'plotting_utils' not in st.session_state:
         st.session_state.plotting_utils = None
     if 'transformation_applied' not in st.session_state:
-        st.session_state.transformation_applied = "none"
+        st.session_state.transformation_applied = "なし" # 'none'から'なし'に統一 (README準拠)
     if 'max_events_used' not in st.session_state:
         st.session_state.max_events_used = 10000
 
@@ -372,7 +178,7 @@ def setup_sidebar():
             
             transformation = st.selectbox(
                 "データ変換",
-                ["none", "log10", "asinh", "biexponential"],
+                ["なし", "Log10", "Asinh", "Biexponential"], # 'none', 'log', 'asinh', 'biexp'から統一
                 index=0,
                 help="なし、Log10、Asinh、Biexponential変換に対応"
             )
@@ -395,7 +201,8 @@ def process_fcs_file(uploaded_file, transformation, max_events):
     """Process FCS file using utils.fcs_processor"""
     try:
         # Use the load_and_process_fcs function from utils
-        processor, data, metadata = load_and_process_fcs(
+        # 戻り値にerror_messageを追加
+        processor, data, metadata, error_message = load_and_process_fcs(
             uploaded_file, 
             transformation, 
             max_events
@@ -409,16 +216,20 @@ def process_fcs_file(uploaded_file, transformation, max_events):
             st.session_state.transformation_applied = transformation
             st.session_state.max_events_used = max_events
             
-            # Get library used info from processor
-            library_used = getattr(processor, 'library_used', 'Unknown')
+            # Get library used info from processor (これはFCSProcessor内で設定される)
+            library_used = processor.used_library if hasattr(processor, 'used_library') and processor.used_library else '不明'
             st.sidebar.success(f"✅ 処理が完了しました")
             st.sidebar.info(f"使用ライブラリ: {library_used}")
             st.rerun()
         else:
-            st.sidebar.error("❌ ファイルの処理に失敗しました")
+            # error_messageがあればそれを表示
+            if error_message:
+                st.sidebar.error(f"❌ ファイルの処理に失敗しました: {error_message}")
+            else:
+                st.sidebar.error("❌ ファイルの処理に失敗しました。")
             
     except Exception as e:
-        st.sidebar.error(f"❌ 処理エラー: {str(e)}")
+        st.sidebar.error(f"❌ 処理中に予期せぬエラーが発生しました: {str(e)}")
         with st.sidebar.expander("エラー詳細"):
             st.text(str(e))
 
@@ -451,8 +262,7 @@ def display_welcome_screen():
             
             <h4>📚 対応ライブラリ：</h4>
             <ul>
-                <li>FlowIO（推奨）</li>
-                <li>FCSParser（フォールバック）</li>
+                <li>FCSProcessor（fcsparser, flowio, flowkitを自動選択）</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -463,7 +273,11 @@ def display_analysis_interface():
     data = st.session_state.fcs_data
     metadata = st.session_state.fcs_metadata
     processor = st.session_state.processor
-    plotting_utils = st.session_state.plotting_utils
+    plotting_utils = st.session_state.plotting_utils # PlottingUtilsはここで初期化済み
+
+    # display_library_status関数の修正により、ここでflowio等のグローバル変数にアクセスできないため、
+    # processorから使用ライブラリ名を取得して表示する
+    library_used = processor.used_library if hasattr(processor, 'used_library') else '不明'
     
     # Display current processing status
     col1, col2, col3, col4 = st.columns(4)
@@ -474,7 +288,7 @@ def display_analysis_interface():
     with col3:
         st.metric("変換方法", st.session_state.transformation_applied)
     with col4:
-        st.metric("最大イベント数", f"{st.session_state.max_events_used:,}")
+        st.metric("使用ライブラリ", library_used)
     
     # 4 tabs as specified in README
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -500,7 +314,7 @@ def display_basic_info_tab(data, metadata, processor):
                 unsafe_allow_html=True)
     
     # Get comprehensive file information using FCSProcessor
-    file_info = processor.get_file_info()
+    file_info = processor.get_file_info() # FCSProcessorのメソッドを使用
     
     # Basic Information section
     col1, col2 = st.columns(2)
@@ -509,10 +323,10 @@ def display_basic_info_tab(data, metadata, processor):
         st.markdown("**基本情報**")
         basic_info = [
             ["総イベント数", format_number(file_info.get('total_events', 'N/A'))],
-            ["パラメータ数", file_info.get('total_parameters', 'N/A')],
-            ["取得日時", file_info.get('acquisition_date', 'N/A')],
+            ["パラメータ数", file_info.get('parameters', 'N/A')], # 'total_parameters' から 'parameters' に変更 (FCSProcessorに合わせる)
+            ["取得日時", file_info.get('date', 'N/A')], # 'acquisition_date' から 'date' に変更
             ["使用機器情報", file_info.get('cytometer', 'N/A')],
-            ["処理ライブラリ", getattr(processor, 'library_used', 'N/A')]
+            ["処理ライブラリ", processor.used_library if hasattr(processor, 'used_library') else 'N/A'] # processorから取得
         ]
         basic_df = pd.DataFrame(basic_info, columns=["項目", "値"])
         st.dataframe(basic_df, hide_index=True, use_container_width=True)
@@ -532,7 +346,7 @@ def display_basic_info_tab(data, metadata, processor):
     st.markdown('<div class="section-header">📋 チャンネル情報</div>', 
                 unsafe_allow_html=True)
     
-    channel_info = processor.get_channel_info()
+    channel_info = processor.get_channel_info() # FCSProcessorのメソッドを使用
     if channel_info:
         # Display channel details
         channel_df = pd.DataFrame.from_dict(channel_info, orient='index')
@@ -592,6 +406,8 @@ def display_enhanced_histogram(data, channels, plotting_utils):
         
         # Display channel statistics
         st.markdown("**選択チャンネル統計**")
+        # 統計情報はFCSProcessorのget_basic_statsから取得することを推奨
+        # ただし、ここでは選択されたチャンネルのみなので、直接Pandasから計算
         channel_stats = {
             "平均値": data[selected_channel].mean(),
             "中央値": data[selected_channel].median(),
@@ -604,20 +420,13 @@ def display_enhanced_histogram(data, channels, plotting_utils):
     
     with col2:
         # Use PlottingUtils if available
-        if plotting_utils:
-            fig = plotting_utils.create_histogram(
-                data, 
-                selected_channel, 
-                title=f"{selected_channel} - 単一チャンネルの分布表示"
-            )
-        else:
-            # Fallback to basic plotly
-            fig = px.histogram(
-                data, 
-                x=selected_channel, 
-                nbins=bins,
-                title=f"{selected_channel} ヒストグラム"
-            )
+        # PlottingUtilsが利用できない場合は、アプリ起動時に停止しているので、elseブロックは不要
+        fig = plotting_utils.create_histogram(
+            data, 
+            selected_channel, 
+            bins=bins, # binsパラメータを追加
+            title=f"{selected_channel} - 単一チャンネルの分布表示"
+        )
         
         if log_scale:
             fig.update_layout(yaxis_type="log")
@@ -645,22 +454,14 @@ def display_enhanced_scatter_plot(data, channels, plotting_utils):
         # Subsample for better performance
         plot_data = data.sample(n=min(sample_size, len(data)), random_state=42)
         
-        if plotting_utils:
-            fig = plotting_utils.create_scatter_plot(
-                plot_data,
-                x_channel,
-                y_channel,
-                title=f"{x_channel} vs {y_channel} - 2Dプロットでの相関解析"
-            )
-        else:
-            # Fallback
-            fig = px.scatter(
-                plot_data,
-                x=x_channel,
-                y=y_channel,
-                title=f"{x_channel} vs {y_channel}",
-                opacity=alpha
-            )
+        # Use PlottingUtils if available (utils unavailable時はアプリ停止済み)
+        fig = plotting_utils.create_scatter_plot(
+            plot_data,
+            x_channel,
+            y_channel,
+            alpha=alpha, # alphaパラメータを追加
+            title=f"{x_channel} vs {y_channel} - 2Dプロットでの相関解析"
+        )
         
         st.plotly_chart(fig, use_container_width=True)
 
@@ -673,33 +474,17 @@ def display_enhanced_density_plot(data, channels, plotting_utils):
         st.markdown("**密度プロット設定**")
         x_channel = st.selectbox("X軸", channels, index=0, key="density_x")
         y_channel = st.selectbox("Y軸", channels, index=1 if len(channels) > 1 else 0, key="density_y")
-        nbins = st.slider("密度計算ビン数", 20, 100, 50)
+        # nbinsはPlottingUtilsのcreate_density_plotで直接利用できない場合があるため、ここでは調整しない
+        # nbins = st.slider("密度計算ビン数", 20, 100, 50) 
     
     with col2:
-        if plotting_utils:
-            fig = plotting_utils.create_density_plot(
-                data,
-                x_channel,
-                y_channel,
-                title=f"{x_channel} vs {y_channel} - 2Dヒストグラムベースの密度可視化"
-            )
-        else:
-            # Fallback
-            fig = go.Figure()
-            fig.add_trace(go.Histogram2dContour(
-                x=data[x_channel],
-                y=data[y_channel],
-                nbinsx=nbins,
-                nbinsy=nbins,
-                contours_coloring='fill',
-                contours_showlabels=True
-            ))
-            
-            fig.update_layout(
-                title=f"{x_channel} vs {y_channel} 密度プロット",
-                xaxis_title=x_channel,
-                yaxis_title=y_channel
-            )
+        # Use PlottingUtils if available (utils unavailable時はアプリ停止済み)
+        fig = plotting_utils.create_density_plot(
+            data,
+            x_channel,
+            y_channel,
+            title=f"{x_channel} vs {y_channel} - 2Dヒストグラムベースの密度可視化"
+        )
         
         st.plotly_chart(fig, use_container_width=True)
         
@@ -715,10 +500,17 @@ def display_gating_tab(data):
     # Link to advanced gating page
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
+        # このボタンは現在のページをリロードするだけなので、
+        # advanced_gating.pyが別のファイルとして存在し、
+        # Streamlitのマルチページ機能でナビゲートする想定であれば、
+        # StreamlitのPage Link機能やst.query_paramsなどを使う必要があります。
+        # ここでは単純に説明文を表示するに留めます。
         if st.button("🔗 高度ゲーティングページへ", type="secondary", use_container_width=True):
+            st.markdown("**(このボタンは現在のデモ版では機能しません。高度なゲーティング機能は別ページ`advanced_gating.py`として実装されていることを想定しています)**")
+            st.markdown("---")
             st.markdown("**高度ゲーティング機能（advanced_gating.py）で利用可能：**")
             st.markdown("- 矩形ゲート: 2次元での矩形領域選択")
-            st.markdown("- ポリゴンゲート: 任意の多角形領域での選択") 
+            st.markdown("- ポリゴンゲート: 任意の多角形領域での選択")  
             st.markdown("- 楕円ゲート: 楕円形領域での選択")
             st.markdown("- 閾値ゲート: 単一パラメータでの閾値設定")
             st.markdown("- インタラクティブ可視化: 密度プロットでのリアルタイムゲート表示")
@@ -746,7 +538,7 @@ def display_gating_tab(data):
         threshold = st.number_input(
             "閾値設定（デフォルト：中央値）",
             value=default_threshold,
-            step=float(data[gate_channel].std() / 10),
+            step=float(data[gate_channel].std() / 10) if data[gate_channel].std() > 0 else 1.0, # stdが0の場合の対処
             format="%.2f"
         )
         
@@ -783,7 +575,7 @@ def display_gating_tab(data):
     
     # Create histogram with gate line
     fig = px.histogram(data, x=gate_channel, nbins=50, 
-                      title=f"{gate_channel} ヒストグラム with ゲート")
+                       title=f"{gate_channel} ヒストグラム with ゲート")
     
     # Add threshold line
     fig.add_vline(x=threshold, line_dash="dash", line_color="red", 
@@ -792,10 +584,10 @@ def display_gating_tab(data):
     # Color the gated region
     if gate_direction in ["以上 (≥)", "より大きい (>)"]:
         fig.add_vrect(x0=threshold, x1=data[gate_channel].max(),
-                     fillcolor="green", opacity=0.2, annotation_text="ゲート領域")
+                      fillcolor="green", opacity=0.2, annotation_text="ゲート領域")
     else:
         fig.add_vrect(x0=data[gate_channel].min(), x1=threshold,
-                     fillcolor="green", opacity=0.2, annotation_text="ゲート領域")
+                      fillcolor="green", opacity=0.2, annotation_text="ゲート領域")
     
     st.plotly_chart(fig, use_container_width=True)
 
@@ -806,7 +598,7 @@ def display_statistics_tab(data, processor):
                 unsafe_allow_html=True)
     
     # Get comprehensive statistics using FCSProcessor
-    stats = processor.get_basic_stats()
+    stats = processor.get_basic_stats() # FCSProcessorのメソッドを使用
     
     if stats:
         # Display all-channel statistics as specified in README
@@ -819,9 +611,9 @@ def display_statistics_tab(data, processor):
         # Format the statistics dataframe for better display
         formatted_stats_df = stats_df.copy()
         for col in formatted_stats_df.columns:
-            if col in ['Mean', 'Median', 'Std', 'Min', 'Max']:
+            if col in ['mean', 'median', 'std', 'min', 'max']: # キー名をFCSProcessorのget_basic_statsに合わせる
                 formatted_stats_df[col] = formatted_stats_df[col].apply(lambda x: f"{x:,.3f}")
-            elif col == 'Count':
+            elif col == 'count': # キー名をFCSProcessorのget_basic_statsに合わせる
                 formatted_stats_df[col] = formatted_stats_df[col].apply(lambda x: f"{int(x):,}")
         
         st.dataframe(formatted_stats_df, use_container_width=True)
@@ -850,6 +642,27 @@ def display_statistics_tab(data, processor):
                     unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
-        
+        with col1:
+            # 元データのエクスポート
+            st.download_button(
+                label="📁 処理済みデータをCSVでダウンロード",
+                data=processor.export_data(data, data_type="data"), # FCSProcessorのexport_dataを使用
+                file_name=f"{st.session_state.processor.filename.rsplit('.', 1)[0]}_data.csv",
+                mime="text/csv",
+                help="現在のビューに表示されている処理済みデータ（サンプリング＆変換済み）をCSV形式でダウンロードします。"
+            )
+        with col2:
+            # 統計データのエクスポート (DataFrameに変換してエクスポート)
+            stats_csv = formatted_stats_df.to_csv(index=True, encoding='utf-8') # index=Trueでチャンネル名も含む
+            st.download_button(
+                label="📈 統計データをCSVでダウンロード",
+                data=stats_csv,
+                file_name=f"{st.session_state.processor.filename.rsplit('.', 1)[0]}_stats.csv",
+                mime="text/csv",
+                help="表示されている統計情報をCSV形式でダウンロードします。"
+            )
+    else:
+        st.info("統計情報が利用できません。")
+
 if __name__ == "__main__":
     main()
