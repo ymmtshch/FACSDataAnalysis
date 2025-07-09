@@ -13,8 +13,8 @@ altair>=5.0.0
 
 # FCS File Processing Libraries (in priority order)
 fcsparser>=0.2.0
-flowio
-flowkit
+#flowio
+#flowkit
 
 # Image Processing and Geometric Calculations
 scikit-image>=0.21.0
