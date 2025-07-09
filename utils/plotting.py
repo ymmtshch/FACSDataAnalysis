@@ -1,5 +1,5 @@
-# utils/plotting.py - Fixed version with better error handling
-# Addresses the NoneType AttributeError issue
+# utils/plotting.py - README.md対応版
+# FACS Data Analysis用の包括的なプロッティングユーティリティ
 
 import numpy as np
 import pandas as pd
@@ -22,13 +22,16 @@ except ImportError:
         'default_colormap': 'viridis'
     }
     DATA_CONFIG = {
-        'default_subsample_size': 10000
+        'default_subsample_size': 10000,
+        'max_events': 100000,
+        'min_events': 1000
     }
 
 class PlottingUtils:
     """
     Main plotting utilities class for FACS data analysis
     Compatible with data from flowio, flowkit, and fcsparser
+    Supports individual axis transformations and advanced visualization
     """
     
     def __init__(self, data=None, metadata=None):
@@ -70,23 +73,32 @@ class PlottingUtils:
         if n_events is None:
             n_events = DATA_CONFIG['default_subsample_size']
         
+        # Ensure n_events is within bounds
+        n_events = max(DATA_CONFIG['min_events'], min(n_events, DATA_CONFIG['max_events']))
+        
         if len(self.data) > n_events:
             return self.data.sample(n=n_events, random_state=42)
         return self.data
     
     def _apply_transform(self, data, transform='linear'):
-        """Apply data transformation with error handling"""
+        """Apply data transformation with enhanced error handling"""
         try:
-            if transform == 'linear' or transform is None:
+            if transform == 'linear' or transform is None or transform == 'なし':
                 return data
-            elif transform == 'log' or transform == 'log10':
+            elif transform == 'log' or transform == 'log10' or transform == 'Log10':
                 # Add small value to avoid log(0) and handle negative values
                 return np.log10(np.maximum(data, 1))
-            elif transform == 'asinh':
-                return np.arcsinh(data / 150)  # Standard cofactor for flow cytometry
-            elif transform == 'biexponential':
-                # Simplified biexponential (using asinh approximation)
+            elif transform == 'asinh' or transform == 'Asinh':
+                # Standard cofactor for flow cytometry
                 return np.arcsinh(data / 150)
+            elif transform == 'biexponential' or transform == 'Biexponential':
+                # Enhanced biexponential transformation
+                # Using parametric approach for better flow cytometry compatibility
+                pos_mask = data > 0
+                result = np.zeros_like(data)
+                result[pos_mask] = np.arcsinh(data[pos_mask] / 150)
+                result[~pos_mask] = -np.arcsinh(np.abs(data[~pos_mask]) / 150)
+                return result
             else:
                 st.warning(f"Unknown transformation: {transform}. Using linear.")
                 return data
@@ -137,12 +149,22 @@ class PlottingUtils:
             # Apply transformation
             plot_data = self._apply_transform(data_subset[channel], transform)
             
+            # Create histogram with enhanced styling
             fig = px.histogram(
                 x=plot_data,
                 nbins=bins,
                 title=title or f"Histogram: {channel}",
-                labels={'x': channel, 'y': 'Count'}
+                labels={'x': channel, 'y': 'Count'},
+                opacity=0.8
             )
+            
+            # Add statistics annotation
+            mean_val = np.mean(plot_data)
+            median_val = np.median(plot_data)
+            fig.add_vline(x=mean_val, line_dash="dash", line_color="red", 
+                         annotation_text=f"Mean: {mean_val:.2f}")
+            fig.add_vline(x=median_val, line_dash="dash", line_color="blue", 
+                         annotation_text=f"Median: {median_val:.2f}")
             
             fig.update_layout(
                 width=PLOT_CONFIG['figure_size'][0],
@@ -158,7 +180,7 @@ class PlottingUtils:
     
     def create_scatter_plot(self, x_channel, y_channel, title=None, 
                           alpha=None, n_points=None, x_transform='linear', y_transform='linear'):
-        """Create scatter plot for two channels - always returns a figure"""
+        """Create scatter plot for two channels with individual axis transformations"""
         # Validate data
         is_valid, msg = self._validate_data()
         if not is_valid:
@@ -183,14 +205,14 @@ class PlottingUtils:
             return self._create_empty_figure(f"{x_channel} vs {y_channel}")
         
         try:
-            # Apply transformations
+            # Apply individual transformations
             x_data = self._apply_transform(data_subset[x_channel], x_transform)
             y_data = self._apply_transform(data_subset[y_channel], y_transform)
             
             fig = px.scatter(
                 x=x_data, y=y_data,
                 title=title or f"{x_channel} vs {y_channel}",
-                labels={'x': x_channel, 'y': y_channel},
+                labels={'x': f"{x_channel} ({x_transform})", 'y': f"{y_channel} ({y_transform})"},
                 opacity=alpha
             )
             
@@ -208,7 +230,7 @@ class PlottingUtils:
     
     def create_density_plot(self, x_channel, y_channel, bins=50, title=None, 
                            x_transform='linear', y_transform='linear'):
-        """Create 2D density plot - always returns a figure"""
+        """Create 2D density plot with individual axis transformations"""
         # Validate data
         is_valid, msg = self._validate_data()
         if not is_valid:
@@ -226,17 +248,17 @@ class PlottingUtils:
             return self._create_empty_figure(f"Density: {x_channel} vs {y_channel}")
         
         try:
-            # Apply transformations
+            # Apply individual transformations
             x_data = self._apply_transform(data_subset[x_channel], x_transform)
             y_data = self._apply_transform(data_subset[y_channel], y_transform)
             
             # Create 2D histogram
             hist, x_edges, y_edges = np.histogram2d(x_data, y_data, bins=bins)
             
-            # Smooth the density
+            # Smooth the density for better visualization
             hist_smooth = gaussian_filter(hist, sigma=1)
             
-            # Create contour plot
+            # Create enhanced contour plot
             fig = go.Figure(data=go.Contour(
                 z=hist_smooth.T,
                 x=x_edges[:-1],
@@ -244,14 +266,15 @@ class PlottingUtils:
                 colorscale=PLOT_CONFIG['default_colormap'],
                 contours=dict(
                     showlabels=True,
-                    labelfont=dict(size=12, color='white')
-                )
+                    labelfont=dict(size=10, color='white')
+                ),
+                showscale=True
             ))
             
             fig.update_layout(
                 title=title or f"Density Plot: {x_channel} vs {y_channel}",
-                xaxis_title=x_channel,
-                yaxis_title=y_channel,
+                xaxis_title=f"{x_channel} ({x_transform})",
+                yaxis_title=f"{y_channel} ({y_transform})",
                 width=PLOT_CONFIG['figure_size'][0],
                 height=PLOT_CONFIG['figure_size'][1]
             )
@@ -263,7 +286,7 @@ class PlottingUtils:
             return self._create_empty_figure(f"Density: {x_channel} vs {y_channel} (Error)")
     
     def create_multi_histogram(self, channels, bins=None, transform='linear'):
-        """Create multiple histograms in subplots - always returns a figure"""
+        """Create multiple histograms in subplots"""
         # Validate data
         is_valid, msg = self._validate_data()
         if not is_valid:
@@ -308,7 +331,8 @@ class PlottingUtils:
             
             fig.update_layout(
                 height=300 * rows,
-                title_text="Multiple Channel Histograms"
+                title_text="Multiple Channel Histograms",
+                showlegend=False
             )
             
             return fig
@@ -318,7 +342,7 @@ class PlottingUtils:
             return self._create_empty_figure("Multiple Histograms (Error)")
     
     def create_correlation_heatmap(self, channels=None, method='pearson'):
-        """Create correlation heatmap - always returns a figure"""
+        """Create correlation heatmap for selected channels"""
         # Validate data
         is_valid, msg = self._validate_data()
         if not is_valid:
@@ -348,7 +372,8 @@ class PlottingUtils:
                 text_auto=True,
                 aspect="auto",
                 color_continuous_scale='RdBu_r',
-                title=f"Channel Correlation Heatmap ({method.title()})"
+                title=f"Channel Correlation Heatmap ({method.title()})",
+                color_continuous_midpoint=0
             )
             
             fig.update_layout(
@@ -362,8 +387,8 @@ class PlottingUtils:
             st.error(f"Error creating correlation heatmap: {str(e)}")
             return self._create_empty_figure("Correlation Heatmap (Error)")
     
-    def get_channel_statistics(self, channel, gate_data=None):
-        """Get basic statistics for a channel"""
+    def get_channel_statistics(self, channel, gate_data=None, transform='linear'):
+        """Get basic statistics for a channel with optional transformation"""
         is_valid, msg = self._validate_data()
         if not is_valid:
             return None
@@ -374,10 +399,11 @@ class PlottingUtils:
         
         try:
             data_to_analyze = gate_data if gate_data is not None else self.data
-            channel_data = data_to_analyze[channel]
+            channel_data = self._apply_transform(data_to_analyze[channel], transform)
             
             stats = {
                 'channel': channel,
+                'transform': transform,
                 'count': len(channel_data),
                 'mean': float(np.mean(channel_data)),
                 'median': float(np.median(channel_data)),
@@ -385,7 +411,8 @@ class PlottingUtils:
                 'min': float(np.min(channel_data)),
                 'max': float(np.max(channel_data)),
                 'q25': float(np.percentile(channel_data, 25)),
-                'q75': float(np.percentile(channel_data, 75))
+                'q75': float(np.percentile(channel_data, 75)),
+                'cv': float(np.std(channel_data) / np.mean(channel_data) * 100) if np.mean(channel_data) != 0 else 0
             }
             
             return stats
@@ -394,8 +421,8 @@ class PlottingUtils:
             st.error(f"Error calculating statistics for {channel}: {str(e)}")
             return None
     
-    def create_statistics_table(self, channels=None, gate_data=None):
-        """Create a statistics table for channels"""
+    def create_statistics_table(self, channels=None, gate_data=None, transform='linear'):
+        """Create a comprehensive statistics table for channels"""
         is_valid, msg = self._validate_data()
         if not is_valid:
             return None
@@ -406,50 +433,56 @@ class PlottingUtils:
         stats_data = []
         for channel in channels:
             if channel in self.channels:
-                stats = self.get_channel_statistics(channel, gate_data)
+                stats = self.get_channel_statistics(channel, gate_data, transform)
                 if stats:
                     stats_data.append(stats)
         
         if stats_data:
-            return pd.DataFrame(stats_data)
+            df = pd.DataFrame(stats_data)
+            # Round numeric columns for better display
+            numeric_columns = ['mean', 'median', 'std', 'min', 'max', 'q25', 'q75', 'cv']
+            for col in numeric_columns:
+                if col in df.columns:
+                    df[col] = df[col].round(3)
+            return df
         return None
 
-# Backward compatibility: module-level functions that use PlottingUtils
-def create_histogram(data, channel, bins=None, title=None, transform='linear', metadata=None):
-    """Create histogram - always returns a figure"""
+# README.md準拠のモジュールレベル関数（後方互換性）
+def create_histogram(data, channel, bins=50, title=None, transform='linear', metadata=None):
+    """Create histogram - README.md準拠のシグネチャ"""
     plotter = PlottingUtils(data, metadata)
     return plotter.create_histogram(channel, bins, title, transform)
 
-def create_scatter_plot(data, x_channel, y_channel, title=None, alpha=None, 
-                       transform='linear', metadata=None):
-    """Create scatter plot - always returns a figure"""
+def create_scatter_plot(data, x_channel, y_channel, title=None, alpha=0.6, 
+                       n_points=None, transform='linear', metadata=None):
+    """Create scatter plot - README.md準拠のシグネチャ"""
     plotter = PlottingUtils(data, metadata)
     return plotter.create_scatter_plot(x_channel, y_channel, title, alpha, 
-                                      None, transform, transform)
+                                      n_points, transform, transform)
 
 def create_density_plot(data, x_channel, y_channel, bins=50, title=None, 
                        transform='linear', metadata=None):
-    """Create density plot - always returns a figure"""
+    """Create density plot - README.md準拠のシグネチャ"""
     plotter = PlottingUtils(data, metadata)
     return plotter.create_density_plot(x_channel, y_channel, bins, title, 
                                       transform, transform)
 
 def create_multi_histogram(data, channels, bins=None, transform='linear', metadata=None):
-    """Create multiple histograms - always returns a figure"""
+    """Create multiple histograms"""
     plotter = PlottingUtils(data, metadata)
     return plotter.create_multi_histogram(channels, bins, transform)
 
 def create_correlation_heatmap(data, channels=None, method='pearson', metadata=None):
-    """Create correlation heatmap - always returns a figure"""
+    """Create correlation heatmap"""
     plotter = PlottingUtils(data, metadata)
     return plotter.create_correlation_heatmap(channels, method)
 
-# Additional utility functions
-def create_interactive_scatter(data, x_channel, y_channel, width=800, height=600):
-    """Create interactive scatter plot - always returns a figure"""
+# 高度な機能のための新しい関数
+def create_interactive_scatter(data, x_channel, y_channel, width=800, height=600, 
+                              x_transform='linear', y_transform='linear', alpha=0.6):
+    """Create interactive scatter plot with enhanced features"""
     if data is None or len(data) == 0:
         st.error("No data available for plotting")
-        # Create empty figure
         fig = go.Figure()
         fig.add_annotation(
             text="No data available for plotting",
@@ -468,7 +501,6 @@ def create_interactive_scatter(data, x_channel, y_channel, width=800, height=600
     # Check if channels exist
     if x_channel not in data.columns or y_channel not in data.columns:
         st.error(f"Channels not found. Available: {list(data.columns)[:10]}...")
-        # Create empty figure
         fig = go.Figure()
         fig.add_annotation(
             text="Channels not found",
@@ -491,14 +523,17 @@ def create_interactive_scatter(data, x_channel, y_channel, width=800, height=600
         plot_data = data
     
     try:
+        plotter = PlottingUtils(data)
+        x_data = plotter._apply_transform(plot_data[x_channel], x_transform)
+        y_data = plotter._apply_transform(plot_data[y_channel], y_transform)
+        
         fig = px.scatter(
-            plot_data, 
-            x=x_channel, 
-            y=y_channel,
+            x=x_data, y=y_data,
             title=f"{x_channel} vs {y_channel}",
+            labels={'x': f"{x_channel} ({x_transform})", 'y': f"{y_channel} ({y_transform})"},
             width=width,
             height=height,
-            opacity=PLOT_CONFIG['default_alpha']
+            opacity=alpha
         )
         
         fig.update_traces(marker=dict(size=PLOT_CONFIG['scatter_size']))
@@ -507,7 +542,6 @@ def create_interactive_scatter(data, x_channel, y_channel, width=800, height=600
         
     except Exception as e:
         st.error(f"Error creating interactive scatter plot: {str(e)}")
-        # Return empty figure on error
         fig = go.Figure()
         fig.add_annotation(
             text=f"Error: {str(e)}",
@@ -522,6 +556,32 @@ def create_interactive_scatter(data, x_channel, y_channel, width=800, height=600
             yaxis=dict(visible=False)
         )
         return fig
+
+def create_enhanced_histogram(data, channel, bins=50, transform='linear', show_stats=True, metadata=None):
+    """Create enhanced histogram with statistics overlay"""
+    plotter = PlottingUtils(data, metadata)
+    fig = plotter.create_histogram(channel, bins, None, transform)
+    
+    if show_stats and data is not None and channel in data.columns:
+        try:
+            stats = plotter.get_channel_statistics(channel, transform=transform)
+            if stats:
+                # Add statistics text box
+                stats_text = f"Mean: {stats['mean']:.2f}<br>Median: {stats['median']:.2f}<br>Std: {stats['std']:.2f}<br>CV: {stats['cv']:.1f}%"
+                fig.add_annotation(
+                    text=stats_text,
+                    xref="paper", yref="paper",
+                    x=0.02, y=0.98, xanchor='left', yanchor='top',
+                    showarrow=False,
+                    font=dict(size=12),
+                    bgcolor="rgba(255,255,255,0.8)",
+                    bordercolor="black",
+                    borderwidth=1
+                )
+        except Exception as e:
+            st.warning(f"Could not add statistics overlay: {str(e)}")
+    
+    return fig
 
 # Legacy class alias for backward compatibility
 class FCSPlotter(PlottingUtils):
