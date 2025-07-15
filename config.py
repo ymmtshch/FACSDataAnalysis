@@ -1,97 +1,73 @@
 # config.py - Simplified Configuration for FACS Data Analysis App
 
-import streamlit as st
-
 # App Configuration
-APP_CONFIG = {
-    'title': 'FACS Data Analysis',
-    'page_title': 'FACSデータ解析',
-    'page_icon': '🔬',
-    'layout': 'wide',
-    'initial_sidebar_state': 'expanded'
-}
+APP_TITLE = 'FACS Data Analysis'
+PAGE_TITLE = 'FACSデータ解析'
+PAGE_ICON = '🔬'
+LAYOUT = 'wide'
 
 # File Upload Configuration
-UPLOAD_CONFIG = {
-    'max_file_size': 100,  # MB
-    'allowed_extensions': ['.fcs'],
-    'supported_formats': ['FCS 2.0', 'FCS 3.0', 'FCS 3.1']
-}
-
-# FCS Library Configuration
-FCS_LIBRARY_CONFIG = {
-    'primary_library': 'fcsparser',
-    'fallback_libraries': ['flowio', 'flowkit']
-}
-
-# Plot Configuration
-PLOT_CONFIG = {
-    'default_bins': 100,
-    'max_bins': 500,
-    'default_alpha': 0.7,
-    'colormap_options': ['viridis', 'plasma', 'inferno', 'magma', 'cividis'],
-    'default_colormap': 'viridis',
-    'figure_size': (800, 600),
-    'plot_types': ['scatter', 'density', 'histogram']
-}
-
-# Gating Configuration
-GATING_CONFIG = {
-    'gate_types': {
-        'threshold': {'label': '閾値ゲート', 'description': '単一パラメータでの閾値設定'},
-        'rectangular': {'label': '矩形ゲート', 'description': '2次元での矩形領域選択'},
-        'polygon': {'label': 'ポリゴンゲート', 'description': '任意の多角形領域での選択'},
-        'ellipse': {'label': '楕円ゲート', 'description': '楕円形領域での選択'}
-    },
-    'gate_colors': ['red', 'blue', 'green', 'orange', 'purple', 'cyan'],
-    'default_gate_color': 'red',
-    'max_gates': 10
-}
+MAX_FILE_SIZE_MB = 100
+ALLOWED_EXTENSIONS = ['.fcs']
 
 # Data Processing Configuration
-DATA_CONFIG = {
-    'min_events_display': 1000,
-    'max_events_display': 100000,
-    'default_max_events': 50000,
-    'transform_methods': {
-        'none': {'label': 'なし'},
-        'log10': {'label': 'Log10'},
-        'asinh': {'label': 'Asinh'},
-        'biexponential': {'label': 'Biexponential'}
-    }
+MIN_EVENTS = 1000
+MAX_EVENTS = 100000
+DEFAULT_MAX_EVENTS = 50000
+
+# Plot Configuration
+DEFAULT_BINS = 100
+MAX_BINS = 500
+DEFAULT_ALPHA = 0.7
+COLORMAP_OPTIONS = ['viridis', 'plasma', 'inferno', 'magma', 'cividis']
+DEFAULT_COLORMAP = 'viridis'
+PLOT_TYPES = ['scatter', 'density', 'histogram']
+
+# Gate Configuration
+GATE_TYPES = {
+    'threshold': '閾値ゲート',
+    'rectangular': '矩形ゲート',
+    'polygon': 'ポリゴンゲート',
+    'ellipse': '楕円ゲート'
+}
+GATE_COLORS = ['red', 'blue', 'green', 'orange', 'purple', 'cyan']
+DEFAULT_GATE_COLOR = 'red'
+MAX_GATES = 10
+
+# Data Transform Methods
+TRANSFORM_METHODS = {
+    'none': 'なし',
+    'log10': 'Log10',
+    'asinh': 'Asinh'
 }
 
-# Page Configuration
-PAGE_CONFIG = {
-    'main_tabs': ['📊 基本情報', '📈 可視化', '🎯 ゲーティング', '📋 統計解析'],
-    'basic_analysis': {
-        'export_format': '{filename}_stats.csv',
-        'data_export_format': '{filename}_data.csv'
-    },
-    'advanced_gating': {
-        'gate_types': ['rectangular', 'polygon', 'ellipse', 'threshold'],
-        'realtime_display': True
-    }
+# Main Tab Configuration
+MAIN_TABS = ['📊 基本情報', '📈 可視化', '🎯 ゲーティング', '📋 統計解析']
+
+# Common Channel Mappings
+CHANNEL_MAPPINGS = {
+    'FSC-A': 'Forward Scatter Area',
+    'FSC-H': 'Forward Scatter Height',
+    'SSC-A': 'Side Scatter Area',
+    'SSC-H': 'Side Scatter Height',
+    'FITC-A': 'FITC Area',
+    'PE-A': 'PE Area',
+    'APC-A': 'APC Area',
+    'PerCP-A': 'PerCP Area'
 }
 
 # Statistics Configuration
-STATS_CONFIG = {
-    'basic_statistics': ['count', 'mean', 'median', 'std', 'min', 'max'],
-    'percentiles': [25, 50, 75, 95]
-}
+BASIC_STATISTICS = ['count', 'mean', 'median', 'std', 'min', 'max']
+PERCENTILES = [25, 50, 75, 95]
 
 # Export Configuration
-EXPORT_CONFIG = {
-    'csv_separator': ',',
-    'include_metadata': True,
-    'file_prefix': 'facs_analysis_',
-    'export_types': ['statistics', 'raw_data', 'gate_data']
-}
+CSV_SEPARATOR = ','
+FILE_PREFIX = 'facs_analysis_'
 
 # Error Messages (Japanese)
 ERROR_MESSAGES = {
-    'file_too_large': f'ファイルサイズが{UPLOAD_CONFIG["max_file_size"]}MBを超えています。',
-    'invalid_file_format': 'FCSファイルをアップロードしてください。',
+    'file_too_large': f'ファイルサイズが{MAX_FILE_SIZE_MB}MBを超えています。',
+    'invalid_file': 'FCSファイルをアップロードしてください。',
     'file_read_error': 'ファイルの読み込みに失敗しました。',
     'insufficient_data': 'データが不十分です。',
     'memory_error': 'メモリ不足です。データサイズを小さくしてください。',
@@ -112,82 +88,159 @@ WARNING_MESSAGES = {
     'memory_optimization': 'メモリ最適化のため、サンプリングが適用されています。'
 }
 
-# Common Channel Mappings
-CHANNEL_MAPPINGS = {
-    'FSC-A': 'Forward Scatter Area',
-    'FSC-H': 'Forward Scatter Height',
-    'SSC-A': 'Side Scatter Area',
-    'SSC-H': 'Side Scatter Height',
-    'FITC-A': 'FITC Area',
-    'PE-A': 'PE Area',
-    'APC-A': 'APC Area',
-    'PerCP-A': 'PerCP Area'
-}
-
 # Utility Functions
 def get_transform_methods():
     """Get available transform methods"""
-    return DATA_CONFIG['transform_methods']
+    return TRANSFORM_METHODS
 
 def get_gate_types():
     """Get available gate types"""
-    return GATING_CONFIG['gate_types']
+    return GATE_TYPES
 
-def get_export_filename(base_filename, export_type):
-    """Generate export filename"""
-    if export_type == 'statistics':
+def get_export_filename(base_filename, export_type='data'):
+    """Generate export filename with simplified logic"""
+    if not base_filename:
+        base_filename = 'facs_data'
+    
+    # Remove extension if present
+    if base_filename.endswith('.fcs'):
+        base_filename = base_filename[:-4]
+    
+    if export_type == 'statistics' or export_type == 'stats':
         return f"{base_filename}_stats.csv"
-    elif export_type == 'raw_data':
-        return f"{base_filename}_data.csv"
-    elif export_type == 'gate_data':
+    elif export_type == 'gate' or export_type == 'gate_data':
         return f"{base_filename}_gate_data.csv"
     else:
-        return f"{base_filename}_export.csv"
+        return f"{base_filename}_data.csv"
 
 def validate_max_events(num_events):
-    """Validate maximum events setting"""
-    min_events = DATA_CONFIG['min_events_display']
-    max_events = DATA_CONFIG['max_events_display']
-    return max(min_events, min(num_events, max_events))
+    """Validate maximum events setting with safe defaults"""
+    if not isinstance(num_events, (int, float)) or num_events <= 0:
+        return DEFAULT_MAX_EVENTS
+    
+    return max(MIN_EVENTS, min(int(num_events), MAX_EVENTS))
 
 def validate_file_size(file_size_bytes):
     """Validate uploaded file size"""
-    max_size_bytes = UPLOAD_CONFIG['max_file_size'] * 1024 * 1024
+    if not isinstance(file_size_bytes, (int, float)) or file_size_bytes <= 0:
+        return False
+    
+    max_size_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
     return file_size_bytes <= max_size_bytes
+
+def get_message(message_type, key):
+    """Get localized message with fallback"""
+    messages = {
+        'error': ERROR_MESSAGES,
+        'success': SUCCESS_MESSAGES,
+        'warning': WARNING_MESSAGES
+    }
+    
+    fallback_messages = {
+        'error': 'エラーが発生しました。',
+        'success': '処理が正常に完了しました。',
+        'warning': '警告: データを確認してください。'
+    }
+    
+    message_dict = messages.get(message_type, {})
+    return message_dict.get(key, fallback_messages.get(message_type, ''))
 
 def get_error_message(error_key):
     """Get localized error message"""
-    return ERROR_MESSAGES.get(error_key, 'エラーが発生しました。')
+    return get_message('error', error_key)
 
 def get_success_message(success_key):
     """Get localized success message"""
-    return SUCCESS_MESSAGES.get(success_key, '処理が正常に完了しました。')
+    return get_message('success', success_key)
 
 def get_warning_message(warning_key):
     """Get localized warning message"""
-    return WARNING_MESSAGES.get(warning_key, '警告: データを確認してください。')
+    return get_message('warning', warning_key)
 
-# Legacy Config class for backward compatibility
+def is_valid_channel(channel_name):
+    """Check if channel name is valid"""
+    if not isinstance(channel_name, str) or not channel_name.strip():
+        return False
+    return True
+
+def get_channel_display_name(channel_name):
+    """Get display name for channel with fallback"""
+    if not is_valid_channel(channel_name):
+        return 'Unknown Channel'
+    
+    return CHANNEL_MAPPINGS.get(channel_name, channel_name)
+
+def validate_bins(bins):
+    """Validate histogram bins with safe defaults"""
+    if not isinstance(bins, (int, float)) or bins <= 0:
+        return DEFAULT_BINS
+    
+    return max(10, min(int(bins), MAX_BINS))
+
+def validate_alpha(alpha):
+    """Validate alpha value with safe defaults"""
+    if not isinstance(alpha, (int, float)):
+        return DEFAULT_ALPHA
+    
+    return max(0.1, min(float(alpha), 1.0))
+
+def get_default_colormap():
+    """Get default colormap"""
+    return DEFAULT_COLORMAP
+
+def is_valid_colormap(colormap):
+    """Check if colormap is valid"""
+    return colormap in COLORMAP_OPTIONS
+
+def get_valid_colormap(colormap):
+    """Get valid colormap with fallback"""
+    if is_valid_colormap(colormap):
+        return colormap
+    return DEFAULT_COLORMAP
+
+def get_gate_color(index=0):
+    """Get gate color by index with fallback"""
+    if not isinstance(index, int) or index < 0:
+        return DEFAULT_GATE_COLOR
+    
+    if index < len(GATE_COLORS):
+        return GATE_COLORS[index]
+    
+    return GATE_COLORS[index % len(GATE_COLORS)]
+
+def can_add_gate(current_gates=0):
+    """Check if more gates can be added"""
+    if not isinstance(current_gates, int) or current_gates < 0:
+        return True
+    
+    return current_gates < MAX_GATES
+
+# Backward compatibility class (simplified)
 class Config:
     """Simplified configuration class for backward compatibility"""
     
-    APP_TITLE = APP_CONFIG['title']
-    PAGE_TITLE = APP_CONFIG['page_title']
-    PAGE_ICON = APP_CONFIG['page_icon']
+    # Basic app settings
+    APP_TITLE = APP_TITLE
+    PAGE_TITLE = PAGE_TITLE
+    PAGE_ICON = PAGE_ICON
     
-    MAX_FILE_SIZE = UPLOAD_CONFIG['max_file_size']
-    ALLOWED_EXTENSIONS = UPLOAD_CONFIG['allowed_extensions']
+    # File settings
+    MAX_FILE_SIZE = MAX_FILE_SIZE_MB
+    ALLOWED_EXTENSIONS = ALLOWED_EXTENSIONS
     
-    DEFAULT_BINS = PLOT_CONFIG['default_bins']
-    MAX_BINS = PLOT_CONFIG['max_bins']
-    DEFAULT_ALPHA = PLOT_CONFIG['default_alpha']
-    COLORMAP_OPTIONS = PLOT_CONFIG['colormap_options']
-    DEFAULT_COLORMAP = PLOT_CONFIG['default_colormap']
+    # Plot settings
+    DEFAULT_BINS = DEFAULT_BINS
+    MAX_BINS = MAX_BINS
+    DEFAULT_ALPHA = DEFAULT_ALPHA
+    COLORMAP_OPTIONS = COLORMAP_OPTIONS
+    DEFAULT_COLORMAP = DEFAULT_COLORMAP
     
-    GATE_COLORS = GATING_CONFIG['gate_colors']
-    DEFAULT_GATE_COLOR = GATING_CONFIG['default_gate_color']
+    # Gate settings
+    GATE_COLORS = GATE_COLORS
+    DEFAULT_GATE_COLOR = DEFAULT_GATE_COLOR
     
-    MAX_EVENTS_DISPLAY = DATA_CONFIG['max_events_display']
+    # Data settings
+    MAX_EVENTS_DISPLAY = MAX_EVENTS
     CHANNEL_MAPPINGS = CHANNEL_MAPPINGS
     
     @classmethod
