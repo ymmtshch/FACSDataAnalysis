@@ -1,4 +1,7 @@
-# Core Streamlit Application
+# FACS Data Analysis - Simplified Requirements
+# Core Dependencies for Basic Functionality
+
+# Web Application Framework
 streamlit>=1.28.0
 
 # Data Processing and Analysis
@@ -6,14 +9,11 @@ pandas>=2.0.0
 numpy>=1.24.0
 scipy>=1.10.0
 
-# Visualization Libraries
+# Visualization (Primary)
 plotly>=5.15.0
-bokeh>=3.2.0
-altair>=5.0.0
 
 # FCS File Processing
 fcsparser>=0.2.0
 
-# Image Processing and Geometric Calculations
-scikit-image>=0.21.0
+# Geometric Calculations (for gating)
 shapely>=2.0.0
