@@ -12,6 +12,7 @@ class FCSProcessor:
         self.filename = filename
         self.fcs_data = None
         self.metadata = None
+        self.used_library = None
         
     def load_fcs_file(self) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
         """FCSファイルを読み込む（fcsparserのみ使用）"""
@@ -20,6 +21,11 @@ class FCSProcessor:
             
             # バイトデータをファイルライクオブジェクトに変換
             file_like = io.BytesIO(self.file_data)
+            
+            # ファイルポインタを先頭に設定
+            file_like.seek(0)
+            
+            # fcsparserでパース
             meta, data = fcsparser.parse(file_like, reformat_meta=True)
             
             # チャンネル名の重複処理
@@ -28,8 +34,13 @@ class FCSProcessor:
             
             self.fcs_data = data
             self.metadata = meta
+            self.used_library = 'fcsparser'
             
             return data, meta, 'fcsparser'
+            
+        except ImportError:
+            st.error("fcsparserライブラリがインストールされていません。")
+            return None, None, None
             
         except Exception as e:
             st.error(f"FCSファイルの読み込みに失敗しました: {str(e)}")
@@ -64,7 +75,8 @@ class FCSProcessor:
             'cytometer': self.metadata.get('$CYT', 'N/A'),
             'experiment_name': self.metadata.get('EXPERIMENT NAME', 'N/A'),
             'sample_id': self.metadata.get('SAMPLE ID', 'N/A'),
-            'operator': self.metadata.get('$OP', 'N/A')
+            'operator': self.metadata.get('$OP', 'N/A'),
+            'software': self.metadata.get('$SRC', 'N/A')
         }
         
         return info
@@ -210,9 +222,16 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         return None, None, None, "ファイルがアップロードされていません。"
     
     try:
+        # ファイルを先頭に戻す
+        uploaded_file.seek(0)
+        
         # ファイルデータを読み込み
         file_data = uploaded_file.read()
         filename = uploaded_file.name
+        
+        # ファイルが空でないかチェック
+        if len(file_data) == 0:
+            return None, None, None, "アップロードされたファイルが空です。"
         
         # FCSProcessorを初期化
         processor = FCSProcessor(file_data, filename)
@@ -226,6 +245,9 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         # データの前処理
         processed_data = processor.preprocess_data(data, metadata)
         
+        if len(processed_data) == 0:
+            return None, None, None, "有効な数値データが見つかりません。"
+        
         # 最大イベント数の制限
         if len(processed_data) > max_events:
             processed_data = processed_data.sample(n=max_events, random_state=42)
@@ -238,10 +260,11 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
                     processed_data[col] = processor.apply_transform(processed_data[col], transformation)
         
         # 成功メッセージ
-        st.success(f"FCSファイルが正常に読み込まれました（fcsparserを使用）")
+        st.success(f"FCSファイルが正常に読み込まれました（{used_library}を使用）")
         
         return processor, processed_data, metadata, None
         
     except Exception as e:
-        st.error(f"ファイル処理中にエラーが発生しました: {str(e)}")
-        return None, None, None, f"ファイル処理中にエラーが発生しました: {str(e)}"
+        error_msg = f"ファイル処理中にエラーが発生しました: {str(e)}"
+        st.error(error_msg)
+        return None, None, None, error_msg
