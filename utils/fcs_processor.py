@@ -8,7 +8,7 @@ import struct
 from typing import Tuple, Dict, Any, Optional
 
 class FCSProcessor:
-    """FCSファイル処理クラス - 修正版"""
+    """FCSファイル処理クラス - メモリ内処理版"""
     
     def __init__(self, file_data: bytes, filename: str):
         self.file_data = file_data
@@ -133,8 +133,9 @@ class FCSProcessor:
         return self._simple_fcs_parser()
     
     def _simple_fcs_parser(self) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
-        """シンプルなFCSパーサー（修正版）"""
+        """シンプルなFCSパーサー（最後の手段）"""
         try:
+            # FCSファイルの基本的な構造を解析
             data_bytes = self.file_data
             
             # ヘッダーを読み取り
@@ -186,47 +187,21 @@ class FCSProcessor:
                 metadata[f'$P{i}S'] = params.get(f'$P{i}S', '')
                 metadata[f'$P{i}R'] = params.get(f'$P{i}R', '1024')
                 metadata[f'$P{i}B'] = params.get(f'$P{i}B', '32')
-                metadata[f'$P{i}E'] = params.get(f'$P{i}E', '0,0')  # 変換パラメータ
-            
-            # 全パラメータをメタデータに追加
-            metadata.update(params)
             
             # データセクションを解析
             data_section = data_bytes[data_start:data_end+1]
             
-            # バイトオーダーを確認
-            byte_order = metadata['$BYTEORD']
-            if byte_order == '4,3,2,1':
-                endian = '>'  # ビッグエンディアン
-            else:
-                endian = '<'  # リトルエンディアン
-            
-            # データサイズを計算
-            total_events = metadata['$TOT']
-            expected_size = total_events * par_count * 4  # 32bit float
-            
-            if len(data_section) < expected_size:
-                st.warning(f"データサイズが不足しています。期待: {expected_size}, 実際: {len(data_section)}")
-                # 利用可能なイベント数を再計算
-                total_events = len(data_section) // (par_count * 4)
-                metadata['$TOT'] = total_events
-                st.info(f"利用可能なイベント数に調整: {total_events}")
-            
             # データ型に基づいてデータを解析
             if metadata['$DATATYPE'] == 'F':
                 # 32bit float
-                data_format = f'{endian}{total_events * par_count}f'
-                try:
-                    data_values = struct.unpack(data_format, data_section[:total_events * par_count * 4])
-                except struct.error as e:
-                    st.error(f"データ解析エラー: {e}")
-                    raise
+                data_format = f'<{metadata["$TOT"] * par_count}f'
+                data_values = struct.unpack(data_format, data_section)
             else:
                 # 他の形式はサポートしていない
                 raise Exception(f"データ型 {metadata['$DATATYPE']} はサポートされていません")
             
             # DataFrameを作成
-            data_array = np.array(data_values).reshape(total_events, par_count)
+            data_array = np.array(data_values).reshape(metadata['$TOT'], par_count)
             
             # チャンネル名を取得
             channel_names = []
@@ -236,40 +211,10 @@ class FCSProcessor:
             
             data_df = pd.DataFrame(data_array, columns=channel_names)
             
-            # データの妥当性チェック
-            self._validate_data(data_df, metadata)
-            
-            return self._process_fcs_data(data_df, metadata, 'Simple FCS Parser (Fixed)')
+            return self._process_fcs_data(data_df, metadata, 'Simple FCS Parser')
             
         except Exception as e:
             raise Exception(f"シンプルFCSパーサーでのエラー: {str(e)}")
-    
-    def _validate_data(self, data_df: pd.DataFrame, metadata: Dict):
-        """データの妥当性をチェック"""
-        # 基本的な統計情報を表示
-        st.info("データ検証情報:")
-        st.write(f"- イベント数: {len(data_df):,}")
-        st.write(f"- パラメータ数: {len(data_df.columns)}")
-        
-        # 各チャンネルの範囲をチェック
-        for i, col in enumerate(data_df.columns):
-            param_num = i + 1
-            expected_range = metadata.get(f'$P{param_num}R', '1024')
-            
-            actual_min = data_df[col].min()
-            actual_max = data_df[col].max()
-            
-            # 異常値の検出
-            if actual_min < -1000000 or actual_max > 1000000:
-                st.warning(f"チャンネル {col}: 異常な値の範囲 ({actual_min:.2f} - {actual_max:.2f})")
-            
-            # 期待範囲との比較
-            try:
-                expected_max = float(expected_range)
-                if actual_max > expected_max * 2:
-                    st.warning(f"チャンネル {col}: 期待範囲を超える値 (期待最大: {expected_max}, 実際最大: {actual_max:.2f})")
-            except:
-                pass
     
     def _process_fcs_data(self, data, meta, library_name) -> Tuple[pd.DataFrame, Dict, str]:
         """FCSデータを処理"""
@@ -396,73 +341,21 @@ class FCSProcessor:
         
         return processed_data
     
-    def apply_transform(self, data: pd.Series, transform_type: str, channel_name: str = None) -> pd.Series:
-        """データ変換を適用（修正版）"""
+    def apply_transform(self, data: pd.Series, transform_type: str) -> pd.Series:
+        """データ変換を適用"""
         if transform_type == "なし":
             return data
         
         try:
             if transform_type == "Log10":
-                # より適切な負の値とゼロの処理
+                # 負の値やゼロを小さな正の値に置換
                 data_transformed = data.copy()
-                
-                # データの範囲を確認
-                min_val = data_transformed.min()
-                max_val = data_transformed.max()
-                
-                # 負の値がある場合の警告
-                if min_val <= 0:
-                    negative_count = (data_transformed <= 0).sum()
-                    st.warning(f"チャンネル {channel_name}: {negative_count}個の負の値またはゼロがあります。最小正の値で置換します。")
-                    
-                    # 最小正の値を見つける
-                    positive_values = data_transformed[data_transformed > 0]
-                    if len(positive_values) > 0:
-                        min_positive = positive_values.min()
-                        replacement_value = min_positive * 0.1  # 最小正の値の10%
-                    else:
-                        replacement_value = 1e-6
-                    
-                    data_transformed[data_transformed <= 0] = replacement_value
-                
+                data_transformed[data_transformed <= 0] = 1e-6
                 return np.log10(data_transformed)
             
             elif transform_type == "Asinh":
-                # 動的co-factorの計算
-                data_range = data.max() - data.min()
-                
-                # データ範囲に基づいてco-factorを調整
-                if data_range < 1000:
-                    co_factor = 5  # 低い値の範囲
-                elif data_range < 10000:
-                    co_factor = 150  # 標準的な蛍光データ
-                else:
-                    co_factor = data_range / 100  # 高い値の範囲
-                
-                # メタデータからco-factorを取得する試み
-                if self.metadata and channel_name:
-                    # チャンネル番号を取得
-                    channel_num = None
-                    for i, col in enumerate(self.fcs_data.columns):
-                        if col == channel_name:
-                            channel_num = i + 1
-                            break
-                    
-                    if channel_num:
-                        # FlowJoスタイルのco-factor
-                        cofactor_key = f'$P{channel_num}E'
-                        if cofactor_key in self.metadata:
-                            try:
-                                cofactor_values = self.metadata[cofactor_key].split(',')
-                                if len(cofactor_values) >= 2:
-                                    co_factor = float(cofactor_values[1])
-                            except:
-                                pass
-                
-                if channel_name:
-                    st.info(f"チャンネル {channel_name}: co-factor = {co_factor:.1f} でAsinh変換を適用")
-                
-                return np.arcsinh(data / co_factor)
+                # Asinh変換（co-factor = 150）
+                return np.arcsinh(data / 150)
             
             else:
                 return data
@@ -515,41 +408,6 @@ class FCSProcessor:
         }
         
         return debug_info
-    
-    def get_enhanced_debug_info(self) -> Dict[str, Any]:
-        """拡張デバッグ情報を取得"""
-        debug_info = self.get_debug_info()
-        
-        if self.fcs_data is not None:
-            # 各チャンネルの詳細統計
-            channel_stats = {}
-            for col in self.fcs_data.columns:
-                try:
-                    col_data = self.fcs_data[col]
-                    channel_stats[col] = {
-                        'min': float(col_data.min()),
-                        'max': float(col_data.max()),
-                        'mean': float(col_data.mean()),
-                        'median': float(col_data.median()),
-                        'std': float(col_data.std()),
-                        'negative_count': int((col_data < 0).sum()),
-                        'zero_count': int((col_data == 0).sum()),
-                        'data_type': str(col_data.dtype),
-                        'null_count': int(col_data.isnull().sum())
-                    }
-                except:
-                    channel_stats[col] = {'error': 'statistics calculation failed'}
-            
-            debug_info['channel_statistics'] = channel_stats
-            
-            # メタデータの詳細情報
-            if self.metadata:
-                debug_info['metadata_sample'] = dict(list(self.metadata.items())[:10])
-                debug_info['byteorder'] = self.metadata.get('$BYTEORD', 'N/A')
-                debug_info['datatype'] = self.metadata.get('$DATATYPE', 'N/A')
-                debug_info['mode'] = self.metadata.get('$MODE', 'N/A')
-        
-        return debug_info
 
 
 def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_events: int = 10000) -> Tuple[Optional['FCSProcessor'], Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
@@ -594,7 +452,7 @@ def load_and_process_fcs(uploaded_file, transformation: str = "なし", max_even
         if transformation != "なし":
             for col in processed_data.columns:
                 if pd.api.types.is_numeric_dtype(processed_data[col]):
-                    processed_data[col] = processor.apply_transform(processed_data[col], transformation, col)
+                    processed_data[col] = processor.apply_transform(processed_data[col], transformation)
         
         # 成功メッセージ
         st.success(f"FCSファイルが正常に読み込まれました（{used_library}を使用）")
