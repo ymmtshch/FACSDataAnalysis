@@ -4,10 +4,11 @@ import io
 import streamlit as st
 import tempfile
 import os
+import struct
 from typing import Tuple, Dict, Any, Optional
 
 class FCSProcessor:
-    """FCSファイル処理クラス - 簡素化版"""
+    """FCSファイル処理クラス - メモリ内処理版"""
     
     def __init__(self, file_data: bytes, filename: str):
         self.file_data = file_data
@@ -17,53 +18,226 @@ class FCSProcessor:
         self.used_library = None
         
     def load_fcs_file(self) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
-        """FCSファイルを読み込む（fcsparserのみ使用）"""
+        """FCSファイルを読み込む（複数の方法を試行）"""
+        
+        # 方法1: fcsparserを一時ファイルで試行
         try:
-            import fcsparser
+            result = self._load_with_tempfile()
+            if result[0] is not None:
+                return result
+        except Exception as e:
+            st.warning(f"一時ファイル方式でのエラー: {str(e)}")
+        
+        # 方法2: fcsparserをBytesIOで試行（新しいバージョン用）
+        try:
+            result = self._load_with_bytesio()
+            if result[0] is not None:
+                return result
+        except Exception as e:
+            st.warning(f"BytesIO方式でのエラー: {str(e)}")
+        
+        # 方法3: 代替FCSパーサーを試行
+        try:
+            result = self._load_with_alternative_parser()
+            if result[0] is not None:
+                return result
+        except Exception as e:
+            st.warning(f"代替パーサーでのエラー: {str(e)}")
+        
+        return None, None, None
+    
+    def _load_with_tempfile(self) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
+        """一時ファイルを使用してFCSファイルを読み込む"""
+        import fcsparser
+        
+        # より安全な一時ファイル作成方法
+        try:
+            # Streamlit Cloudでは /tmp が使用できない場合があるため、複数のディレクトリを試行
+            temp_dirs = [
+                tempfile.gettempdir(),
+                '/tmp',
+                os.path.expanduser('~'),
+                '.'
+            ]
             
-            # 一時ファイルを作成してバイトデータを書き込み
+            for temp_dir in temp_dirs:
+                try:
+                    if os.path.exists(temp_dir) and os.access(temp_dir, os.W_OK):
+                        temp_file_path = os.path.join(temp_dir, f"temp_{hash(self.filename)}.fcs")
+                        
+                        # ファイルを書き込み
+                        with open(temp_file_path, 'wb') as f:
+                            f.write(self.file_data)
+                        
+                        # FCSファイルをパース
+                        meta, data = fcsparser.parse(temp_file_path, reformat_meta=True)
+                        
+                        # 一時ファイルを削除
+                        if os.path.exists(temp_file_path):
+                            os.unlink(temp_file_path)
+                        
+                        return self._process_fcs_data(data, meta, 'fcsparser (tempfile)')
+                        
+                except (OSError, PermissionError) as e:
+                    continue
+                    
+        except Exception as e:
+            raise e
+        
+        raise Exception("一時ファイルの作成に失敗しました")
+    
+    def _load_with_bytesio(self) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
+        """BytesIOを使用してFCSファイルを読み込む"""
+        import fcsparser
+        
+        # バイトデータをファイルライクオブジェクトに変換
+        file_like = io.BytesIO(self.file_data)
+        file_like.seek(0)
+        
+        # fcsparserでパース（新しいバージョンでサポート）
+        meta, data = fcsparser.parse(file_like, reformat_meta=True)
+        
+        return self._process_fcs_data(data, meta, 'fcsparser (BytesIO)')
+    
+    def _load_with_alternative_parser(self) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
+        """代替FCSパーサーを使用"""
+        try:
+            # FlowCytometryToolsを試行
+            import FlowCytometryTools as fct
+            
+            # 一時ファイルを作成
             with tempfile.NamedTemporaryFile(delete=False, suffix='.fcs') as tmp_file:
                 tmp_file.write(self.file_data)
                 tmp_file_path = tmp_file.name
             
             try:
-                # 一時ファイルからFCSファイルを読み込み
-                meta, data = fcsparser.parse(tmp_file_path, reformat_meta=True)
+                # FlowCytometryToolsでパース
+                sample = fct.FCMeasurement(ID='sample', datafile=tmp_file_path)
+                data = sample.data
+                meta = sample.meta
                 
-                # データがnumpy配列の場合、DataFrameに変換
-                if isinstance(data, np.ndarray):
-                    # チャンネル名の取得
-                    channel_names = []
-                    for i in range(data.shape[1]):
-                        # $PnN (short name) を優先、なければ $PnS (long name) を使用
-                        short_name = meta.get(f'$P{i+1}N', f'Channel_{i+1}')
-                        long_name = meta.get(f'$P{i+1}S', short_name)
-                        channel_names.append(short_name if short_name else long_name)
-                    
-                    data = pd.DataFrame(data, columns=channel_names)
-                
-                # チャンネル名の重複処理
-                if isinstance(data, pd.DataFrame):
-                    data.columns = self._handle_duplicate_channels(list(data.columns))
-                
-                self.fcs_data = data
-                self.metadata = meta
-                self.used_library = 'fcsparser'
-                
-                return data, meta, 'fcsparser'
-                
-            finally:
                 # 一時ファイルを削除
                 if os.path.exists(tmp_file_path):
                     os.unlink(tmp_file_path)
-            
+                
+                return self._process_fcs_data(data, meta, 'FlowCytometryTools')
+                
+            finally:
+                if os.path.exists(tmp_file_path):
+                    os.unlink(tmp_file_path)
+                    
         except ImportError:
-            st.error("fcsparserライブラリがインストールされていません。")
-            return None, None, None
+            pass
+        
+        # 最後の手段：シンプルなFCSパーサー
+        return self._simple_fcs_parser()
+    
+    def _simple_fcs_parser(self) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[str]]:
+        """シンプルなFCSパーサー（最後の手段）"""
+        try:
+            # FCSファイルの基本的な構造を解析
+            data_bytes = self.file_data
+            
+            # ヘッダーを読み取り
+            if len(data_bytes) < 58:
+                raise Exception("FCSファイルが短すぎます")
+            
+            # FCSバージョンを確認
+            version = data_bytes[0:6].decode('ascii', errors='ignore')
+            if not version.startswith('FCS'):
+                raise Exception("有効なFCSファイルではありません")
+            
+            # TEXT セクションの位置を取得
+            text_start = int(data_bytes[10:18].decode('ascii', errors='ignore').strip())
+            text_end = int(data_bytes[18:26].decode('ascii', errors='ignore').strip())
+            
+            # DATAセクションの位置を取得
+            data_start = int(data_bytes[26:34].decode('ascii', errors='ignore').strip())
+            data_end = int(data_bytes[34:42].decode('ascii', errors='ignore').strip())
+            
+            # TEXTセクションを解析
+            text_section = data_bytes[text_start:text_end+1].decode('ascii', errors='ignore')
+            
+            # 区切り文字を取得
+            delimiter = text_section[0]
+            
+            # パラメータを解析
+            params = {}
+            parts = text_section[1:].split(delimiter)
+            
+            for i in range(0, len(parts)-1, 2):
+                if i+1 < len(parts):
+                    key = parts[i].strip()
+                    value = parts[i+1].strip()
+                    params[key] = value
+            
+            # 基本的なメタデータを構築
+            metadata = {
+                '$TOT': int(params.get('$TOT', '0')),
+                '$PAR': int(params.get('$PAR', '0')),
+                '$DATATYPE': params.get('$DATATYPE', 'F'),
+                '$MODE': params.get('$MODE', 'L'),
+                '$BYTEORD': params.get('$BYTEORD', '1,2,3,4')
+            }
+            
+            # チャンネル情報を追加
+            par_count = metadata['$PAR']
+            for i in range(1, par_count + 1):
+                metadata[f'$P{i}N'] = params.get(f'$P{i}N', f'Par{i}')
+                metadata[f'$P{i}S'] = params.get(f'$P{i}S', '')
+                metadata[f'$P{i}R'] = params.get(f'$P{i}R', '1024')
+                metadata[f'$P{i}B'] = params.get(f'$P{i}B', '32')
+            
+            # データセクションを解析
+            data_section = data_bytes[data_start:data_end+1]
+            
+            # データ型に基づいてデータを解析
+            if metadata['$DATATYPE'] == 'F':
+                # 32bit float
+                data_format = f'<{metadata["$TOT"] * par_count}f'
+                data_values = struct.unpack(data_format, data_section)
+            else:
+                # 他の形式はサポートしていない
+                raise Exception(f"データ型 {metadata['$DATATYPE']} はサポートされていません")
+            
+            # DataFrameを作成
+            data_array = np.array(data_values).reshape(metadata['$TOT'], par_count)
+            
+            # チャンネル名を取得
+            channel_names = []
+            for i in range(par_count):
+                name = metadata.get(f'$P{i+1}N', f'Channel_{i+1}')
+                channel_names.append(name)
+            
+            data_df = pd.DataFrame(data_array, columns=channel_names)
+            
+            return self._process_fcs_data(data_df, metadata, 'Simple FCS Parser')
             
         except Exception as e:
-            st.error(f"FCSファイルの読み込みに失敗しました: {str(e)}")
-            return None, None, None
+            raise Exception(f"シンプルFCSパーサーでのエラー: {str(e)}")
+    
+    def _process_fcs_data(self, data, meta, library_name) -> Tuple[pd.DataFrame, Dict, str]:
+        """FCSデータを処理"""
+        # データがnumpy配列の場合、DataFrameに変換
+        if isinstance(data, np.ndarray):
+            # チャンネル名の取得
+            channel_names = []
+            for i in range(data.shape[1]):
+                short_name = meta.get(f'$P{i+1}N', f'Channel_{i+1}')
+                long_name = meta.get(f'$P{i+1}S', short_name)
+                channel_names.append(short_name if short_name else long_name)
+            
+            data = pd.DataFrame(data, columns=channel_names)
+        
+        # チャンネル名の重複処理
+        if isinstance(data, pd.DataFrame):
+            data.columns = self._handle_duplicate_channels(list(data.columns))
+        
+        self.fcs_data = data
+        self.metadata = meta
+        self.used_library = library_name
+        
+        return data, meta, library_name
     
     def _handle_duplicate_channels(self, channel_names: list) -> list:
         """重複するチャンネル名を処理"""
@@ -226,9 +400,11 @@ class FCSProcessor:
         """デバッグ情報を取得"""
         debug_info = {
             'filename': self.filename,
+            'file_size': len(self.file_data),
             'data_shape': self.fcs_data.shape if self.fcs_data is not None else None,
             'metadata_keys_count': len(self.metadata) if self.metadata else 0,
-            'column_names': list(self.fcs_data.columns) if self.fcs_data is not None else []
+            'column_names': list(self.fcs_data.columns) if self.fcs_data is not None else [],
+            'used_library': self.used_library
         }
         
         return debug_info
