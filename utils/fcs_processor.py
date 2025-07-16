@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import io
 import streamlit as st
+import tempfile
+import os
 from typing import Tuple, Dict, Any, Optional
 
 class FCSProcessor:
@@ -19,24 +21,41 @@ class FCSProcessor:
         try:
             import fcsparser
             
-            # バイトデータをファイルライクオブジェクトに変換
-            file_like = io.BytesIO(self.file_data)
+            # 一時ファイルを作成してバイトデータを書き込み
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.fcs') as tmp_file:
+                tmp_file.write(self.file_data)
+                tmp_file_path = tmp_file.name
             
-            # ファイルポインタを先頭に設定
-            file_like.seek(0)
-            
-            # fcsparserでパース
-            meta, data = fcsparser.parse(file_like, reformat_meta=True)
-            
-            # チャンネル名の重複処理
-            if isinstance(data, pd.DataFrame):
-                data.columns = self._handle_duplicate_channels(list(data.columns))
-            
-            self.fcs_data = data
-            self.metadata = meta
-            self.used_library = 'fcsparser'
-            
-            return data, meta, 'fcsparser'
+            try:
+                # 一時ファイルからFCSファイルを読み込み
+                meta, data = fcsparser.parse(tmp_file_path, reformat_meta=True)
+                
+                # データがnumpy配列の場合、DataFrameに変換
+                if isinstance(data, np.ndarray):
+                    # チャンネル名の取得
+                    channel_names = []
+                    for i in range(data.shape[1]):
+                        # $PnN (short name) を優先、なければ $PnS (long name) を使用
+                        short_name = meta.get(f'$P{i+1}N', f'Channel_{i+1}')
+                        long_name = meta.get(f'$P{i+1}S', short_name)
+                        channel_names.append(short_name if short_name else long_name)
+                    
+                    data = pd.DataFrame(data, columns=channel_names)
+                
+                # チャンネル名の重複処理
+                if isinstance(data, pd.DataFrame):
+                    data.columns = self._handle_duplicate_channels(list(data.columns))
+                
+                self.fcs_data = data
+                self.metadata = meta
+                self.used_library = 'fcsparser'
+                
+                return data, meta, 'fcsparser'
+                
+            finally:
+                # 一時ファイルを削除
+                if os.path.exists(tmp_file_path):
+                    os.unlink(tmp_file_path)
             
         except ImportError:
             st.error("fcsparserライブラリがインストールされていません。")
