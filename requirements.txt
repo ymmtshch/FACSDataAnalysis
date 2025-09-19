@@ -8,6 +8,7 @@ streamlit>=1.28.0
 pandas>=2.0.0
 numpy>=1.24.0
 scipy>=1.10.0
+scikit-learn
 
 # Visualization (Primary)
 plotly>=5.15.0
@@ -17,3 +18,4 @@ fcsparser
 
 # Geometric Calculations (for gating)
 shapely>=2.0.0
+
