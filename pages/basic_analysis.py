@@ -82,6 +82,8 @@ def main():
     # 詳細メタデータ表示
     if st.expander("📋 詳細メタデータ"):
         important_keys = ['$TOT', '$PAR', '$DATE', '$BTIM', '$ETIM', '$CYT', '$CYTNUM']
+from utils.fcs_loader import process_file
+
         meta_display = {}
         for key in important_keys:
             if key in meta:
