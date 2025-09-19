@@ -311,7 +311,7 @@ def display_basic_info(data, processor):
                 ["使用機器", file_info.get('cytometer', 'N/A')]
             ]
             st.dataframe(pd.DataFrame(info_data, columns=["項目", "値"]), 
-                        hide_index=True, use_container_width=True)
+                        hide_index=True, width='stretch')
         
         with col2:
             st.markdown("**実験情報**")
@@ -322,7 +322,7 @@ def display_basic_info(data, processor):
                 ["ソフトウェア", file_info.get('software', 'N/A')]
             ]
             st.dataframe(pd.DataFrame(exp_data, columns=["項目", "値"]), 
-                        hide_index=True, use_container_width=True)
+                        hide_index=True, width='stretch')
     
     except Exception as e:
         st.warning(f"ファイル情報の取得中にエラーが発生しました: {str(e)}")
@@ -352,7 +352,7 @@ def display_basic_info(data, processor):
     
     # Show first 100 rows
     preview_data = data.head(100)
-    st.dataframe(preview_data, height=300, use_container_width=True)
+    st.dataframe(preview_data, height=300, width='stretch')
     
     st.info(f"💡 表示: 最初の100行 / 総計 {len(data):,} 行")
 
@@ -406,13 +406,13 @@ def display_histogram(data, channels, plotting_utils):
             ["中央値", f"{channel_data.median():.2f}"]
         ]
         st.dataframe(pd.DataFrame(stats_data, columns=["統計", "値"]), 
-                    hide_index=True, use_container_width=True)
+                    hide_index=True, width='stretch')
     
     with col2:
         fig = plotting_utils.create_histogram(data, channel, bins=bins)
         if log_scale:
             fig.update_layout(yaxis_type="log")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
 def display_scatter_plot(data, channels, plotting_utils):
     """Display scatter plot"""
@@ -434,7 +434,7 @@ def display_scatter_plot(data, channels, plotting_utils):
         # Sample data if too large
         plot_data = data.sample(n=min(len(data), 10000))
         fig = plotting_utils.create_scatter_plot(plot_data, x_channel, y_channel, alpha=alpha)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
 def display_density_plot(data, channels, plotting_utils):
     """Display density plot"""
@@ -455,7 +455,7 @@ def display_density_plot(data, channels, plotting_utils):
         # Sample data if too large
         plot_data = data.sample(n=min(len(data), 10000))
         fig = plotting_utils.create_density_plot(plot_data, x_channel, y_channel)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
 def display_gating(data):
     """Gating tab with basic threshold gating"""
@@ -539,7 +539,7 @@ def display_gating(data):
                           fillcolor="green", opacity=0.2, 
                           annotation_text="ゲート領域")
         
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     
     except Exception as e:
         st.error(f"❌ ゲーティング処理中にエラーが発生しました: {str(e)}")
@@ -567,7 +567,7 @@ def display_statistics(data, processor):
             if available_columns:
                 stats_df = stats_df[available_columns]
             
-            st.dataframe(stats_df, use_container_width=True)
+            st.dataframe(stats_df, width='stretch')
             
             # Summary metrics
             st.markdown("### 統計サマリー")
@@ -598,7 +598,7 @@ def display_statistics(data, processor):
             
             if len(numeric_cols) > 0:
                 manual_stats = data[numeric_cols].describe()
-                st.dataframe(manual_stats, use_container_width=True)
+                st.dataframe(manual_stats, width='stretch')
             else:
                 st.error("❌ 数値データがありません")
         
